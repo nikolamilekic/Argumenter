@@ -1,0 +1,33 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"fsharp","items":[{"name":"fsharp","languageName":"F#","aliases":["f#","F#"]},{"name":"vscode","aliases":["frontend"],"languageName":null},{"name":"mermaid","languageName":"Mermaid","aliases":[]}]}}
+
+#!markdown
+
+# Argumenter Sample Usage
+
+Goals:
+- Arguments are automatically inferred from properties of a class
+- Commands are inferred from classes that inherit from the root class
+- Names of command argument classes can have Arguments suffix, which is then ignored
+- Required/optional arguments are determined based on property type:
+    - Optional and nullable are not required
+    - All other properties are
+- Commands are not required by default, unless builder property is set
+- Inherited classes are scanned from the assembly containing the root class (this can be expanded later)
+- Validator returns a set of parsing errors
+
+TBD:
+- Documentation
+- Custom argument types (custom parsers)
+
+#!fsharp
+
+type MyArguments() =
+    member val RequiredString = "" with get, set
+    member val OptionalString : string option = None with get, set
+
+type OpenArguments() =
+    inherit MyArguments()
+
+    member val RequiredOpenArgument = "" with get, set

@@ -2,12 +2,48 @@ STORAGE: NONE
 RESTRICTION: == net6.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
+    Expecto (9.0.4)
+      FSharp.Core (>= 4.6)
+      Mono.Cecil (>= 0.11.3)
+    Expecto.FsCheck (9.0.4)
+      Expecto (>= 9.0.4)
+      FsCheck (>= 2.14.3)
+    FParsec (1.1.1)
+      FSharp.Core (>= 4.3.4)
+    FsCheck (2.16.5)
+      FSharp.Core (>= 4.2.3)
     FSharp.Core (6.0)
+    FSharpPlus (1.2.5)
+      FSharp.Core (>= 4.6.2)
     GitInfo (2.3) - copy_local: true
     Microsoft.Build.Tasks.Git (1.1.1) - copy_local: true
+    Microsoft.CodeCoverage (17.4.1)
+    Microsoft.NET.Test.Sdk (17.4.1)
+      Microsoft.CodeCoverage (>= 17.4.1)
+      Microsoft.TestPlatform.TestHost (>= 17.4.1)
     Microsoft.SourceLink.Common (1.1.1) - copy_local: true
     Microsoft.SourceLink.GitHub (1.1.1) - copy_local: true
       Microsoft.Build.Tasks.Git (>= 1.1.1)
       Microsoft.SourceLink.Common (>= 1.1.1)
+    Microsoft.TestPlatform.ObjectModel (17.4.1)
+      NuGet.Frameworks (>= 5.11)
+      System.Reflection.Metadata (>= 1.6)
+    Microsoft.TestPlatform.TestHost (17.4.1)
+      Microsoft.TestPlatform.ObjectModel (>= 17.4.1)
+      Newtonsoft.Json (>= 13.0.1)
     Milekic.YoLo (3.4) - storage: packages
       FSharp.Core (>= 6.0)
+    Mono.Cecil (0.11.4)
+    Newtonsoft.Json (13.0.2)
+    NuGet.Frameworks (6.4)
+    System.Collections.Immutable (7.0)
+      System.Runtime.CompilerServices.Unsafe (>= 6.0)
+    System.Reflection.Metadata (7.0)
+      System.Collections.Immutable (>= 7.0)
+    System.Runtime.CompilerServices.Unsafe (6.0)
+    Unquote (6.1)
+      FSharp.Core (>= 4.7.2)
+    YoloDev.Expecto.TestSdk (1.0)
+      Expecto (>= 9.0 < 10.0)
+      FSharp.Core (>= 4.6)
+      System.Collections.Immutable (>= 1.7.1)

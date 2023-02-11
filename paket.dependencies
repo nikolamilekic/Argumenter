@@ -8,3 +8,13 @@ nuget FSharp.Core >= 6.0.0 lowest_matching: true
 nuget GitInfo copy_local: true
 nuget Microsoft.SourceLink.GitHub copy_local: true
 nuget Milekic.YoLo storage: packages
+nuget FSharpPlus
+nuget FParsec
+
+// Testing
+
+nuget Microsoft.NET.Test.Sdk
+nuget YoloDev.Expecto.TestSdk
+nuget Expecto
+nuget Expecto.FsCheck
+nuget Unquote
