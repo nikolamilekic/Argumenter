@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    branches: [ release ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+    - name: Run Fake
+      run: ./build.sh -t ReleaseAction
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        OP_CONNECT_HOST: ${{ secrets.OP_CONNECT_HOST }}
+        OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
+        OP_CONNECT_ADDITIONAL_HEADERS: ${{ secrets.OP_CONNECT_ADDITIONAL_HEADERS }}
+        #NUGET_KEY: 'op://GitHub/ydrpj427izhcost4gs3gsy2jfe/credential'
+        SLEET_FEED_TYPE: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/type'
+        SLEET_FEED_BASEURI: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/baseURI'
+        SLEET_FEED_CONTAINER: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/container'
+        SLEET_FEED_CONNECTIONSTRING: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/connectionString'
+  #publish-windows:
+  #  needs: build
+  #  runs-on: windows-latest
+  #  steps:
+  #  - uses: actions/checkout@v2
+  #    with:
+  #      fetch-depth: 0
+  #  - name: Setup .NET
+  #    uses: actions/setup-dotnet@v1
+  #  - name: Run Fake
+  #    run: ./build.cmd -t PublishWindowsAction
+  #    env:
+  #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #      OP_CONNECT_HOST: ${{ secrets.OP_CONNECT_HOST }}
+  #      OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
+  #      OP_CONNECT_ADDITIONAL_HEADERS: ${{ secrets.OP_CONNECT_ADDITIONAL_HEADERS }}
+  #      NUGET_KEY: 'op://GitHub/ydrpj427izhcost4gs3gsy2jfe/credential'
+  #      SLEET_FEED_TYPE: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/type'
+  #      SLEET_FEED_BASEURI: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/baseURI'
+  #      SLEET_FEED_CONTAINER: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/container'
+  #      SLEET_FEED_CONNECTIONSTRING: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/connectionString'
+  #publish-macos:
+  #  needs: build
+  #  runs-on: macos-latest
+  #  steps:
+  #  - uses: actions/checkout@v2
+  #    with:
+  #      fetch-depth: 0
+  #  - name: Setup .NET
+  #    uses: actions/setup-dotnet@v1
+  #  - name: Run Fake
+  #    run: ./build.sh -t PublishMacOSAction
+  #    env:
+  #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #      OP_CONNECT_HOST: ${{ secrets.OP_CONNECT_HOST }}
+  #      OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
+  #      OP_CONNECT_ADDITIONAL_HEADERS: ${{ secrets.OP_CONNECT_ADDITIONAL_HEADERS }}
+  #      NUGET_KEY: 'op://GitHub/ydrpj427izhcost4gs3gsy2jfe/credential'
+  #      SLEET_FEED_TYPE: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/type'
+  #      SLEET_FEED_BASEURI: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/baseURI'
+  #      SLEET_FEED_CONTAINER: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/container'
+  #      SLEET_FEED_CONNECTIONSTRING: 'op://GitHub/eowr7yml3nrvy3iobdcil5z6r4/connectionString'

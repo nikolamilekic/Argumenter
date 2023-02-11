@@ -1,0 +1,13 @@
+STORAGE: NONE
+RESTRICTION: == net6.0
+NUGET
+  remote: https://api.nuget.org/v3/index.json
+    FSharp.Core (6.0)
+    GitInfo (2.3) - copy_local: true
+    Microsoft.Build.Tasks.Git (1.1.1) - copy_local: true
+    Microsoft.SourceLink.Common (1.1.1) - copy_local: true
+    Microsoft.SourceLink.GitHub (1.1.1) - copy_local: true
+      Microsoft.Build.Tasks.Git (>= 1.1.1)
+      Microsoft.SourceLink.Common (>= 1.1.1)
+    Milekic.YoLo (3.4) - storage: packages
+      FSharp.Core (>= 6.0)
