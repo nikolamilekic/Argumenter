@@ -2,13 +2,15 @@
 
 open Expecto
 open FSharpPlus
+open FSharpPlus.Lens
 open Milekic.YoLo
 open FParsec
 open FsCheck
 open Swensen.Unquote
 
 open Argumenter
-open Argumenter.Parsers
+open Parsers
+open ArgumentInfo
 
 let Ok = Result.Ok
 let Error = Result.Error
@@ -20,7 +22,8 @@ let parserResultToResultWithState = function
     | ParserResult.Success (result, state, _) -> Ok result, state
     | ParserResult.Failure (message, _, state) -> Error message, state
 
-let runParser p = runParserOnString p zero ""
+let rec runParser p state = runParserOnString p state ""
+let runUnitParser p = runParserOnString p () ""
 
 let normalizeSingleWord (NonEmptyString s) =
     ("a" + s)
@@ -38,13 +41,13 @@ let stringArgumentTests = [
     testProperty "singleWordString raw parser" <| fun s ->
         let input = normalizeSingleWord s
         let expected = input.Split(' ', '\t', '\n', '\r').[0]
-        (runParser singleWordString input
+        (runUnitParser singleWordString input
         |> parserResultToResult
         = Ok expected)
     testProperty "multiWordString raw parser" <| fun s ->
         let expected = normalizeSingleLine s
         let input = "\"" + expected + "\""
-        let actual = runParser multiWordString input |> parserResultToResult
+        let actual = runUnitParser multiWordString input |> parserResultToResult
         let result = actual = Ok expected
         result
     testProperty "singleWordString" <| fun argumentName argument ->
@@ -53,7 +56,7 @@ let stringArgumentTests = [
         let expected = input.Split(' ', '\t', '\n', '\r').[0]
         let parser = Parsers.argument argumentName stringArgument
         let actual =
-            runParser parser $"--{argumentName} {input}"
+            runUnitParser parser $"--{argumentName} {input}"
             |> parserResultToResult
         let result = actual = Ok expected
         result
@@ -63,40 +66,13 @@ let stringArgumentTests = [
         let argumentName = normalizeSingleWord argumentName
         let parser = Parsers.argument argumentName stringArgument
         let actual =
-            runParser parser $"--{argumentName} {input}"
+            runUnitParser parser $"--{argumentName} {input}"
             |> parserResultToResult
         let result = actual = Ok expected
         result
 ]
 
-let argumentStateTests = [
-    testCase "Parsed arguments are added to the state" <| fun _ ->
-        let argumentName = "argumentName"
-        let parser = argument argumentName stringArgument
-        let actual, state =
-            runParser parser $"--{argumentName} argumentValue"
-            |> parserResultToResultWithState
-        actual =! Ok "argumentValue"
-        test <@ state.SpecifiedArguments |> Set.contains argumentName @>
-    testCase "Arguments that are not parsed are not added to the state" <| fun _ ->
-        let argument1 = argument "argument1" stringArgument
-        let argument2 = argument "argument2" stringArgument
-        let argument3 = argument "argument3" stringArgument
-        let parser = many (choice [argument1; argument2; argument3])
-        let result, state =
-            runParser parser "--argument1 argumentValue --argument3 argumentValue"
-            |> parserResultToResultWithState
-        <@
-            result |> Result.isOk &&
-            state.SpecifiedArguments |> Set.contains "argument1" &&
-            state.SpecifiedArguments |> Set.contains "argument3" &&
-            not (state.SpecifiedArguments |> Set.contains "argument2")
-        @>
-        |> test
-]
-
 [<Tests>]
 let parserTests = testList "Parser" [
     testList "stringArgument" stringArgumentTests
-    testList "argumentState" argumentStateTests
 ]

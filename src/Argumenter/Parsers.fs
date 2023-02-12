@@ -1,11 +1,12 @@
 ﻿module Argumenter.Parsers
 
 open System
+open System.Collections.Generic
 open FSharpPlus
 open FSharpPlus.Lens
 open FParsec
 
-open ParserData
+open ArgumentInfo
 
 let Ok = Result.Ok
 let Error = Result.Error
@@ -21,35 +22,43 @@ let multiWordString<'a> : Parser<_, 'a> =
 let stringArgument<'a> : Parser<_, 'a> = (multiWordString <|> singleWordString)
 let getRawParser (t : Type) : Result<Parser<_, _>, _> = monad.strict {
     if (t = typeof<string>) then
-        return stringArgument
+        return stringArgument |>> box
     else
         return! Error $"{t.FullName} is not a supported argument type."
 }
-
-let argument name parser =
+let argument (name : string) parser =
     skipStringCI $"--{name}" >>. spaces1 >>. parser
-    .>> updateUserState (_specifiedArguments %-> Set.add name)
     <?> $"--{name.ToLower()}"
-let assign assigner value =
-    updateUserState (_assigner %-> (fun a -> a >> assigner value))
-
-let validateRequiredArguments expected =
-    getUserState >>= fun state ->
-        let specified = state ^. _specifiedArguments
-        let missing = Set.difference expected specified
-        if Set.isEmpty missing then preturn (state ^. _assigner)
-        else
-            let missingString = String.concat ", " missing
-            fail $"The following required arguments are missing: {missingString}"
-let makeParser (argumentInfos : ArgumentInfo seq) : Parser<unit, ParserData> =
-    let requiredArguments =
-        argumentInfos
-        |> Seq.filter (fun info -> info.IsRequired)
-        |> Seq.map (fun info -> info.ArgumentName)
+let makeParser expectedArguments : Parser<obj -> obj, _> =
+    let inline _key f (s : KeyValuePair<'k ,'v>) = s.Key |> f
+    let inline _value f (s : KeyValuePair<'k ,'v>) = s.Value |> f
+    let required =
+        expectedArguments
+        |> Seq.filter (view (_value << _isRequired))
+        |> Seq.map (view _key)
         |> Set
-    argumentInfos
-    |> Seq.map (fun info -> argument info.ArgumentName info.Parser)
-    |> choice
-    |> many
-    >>. (eof <?> "")
-    .>> validateRequiredArguments requiredArguments
+    let rec pendingArgumentsParser (providedArguments : Set<_>, composite : obj -> obj) =
+        let remover argumentName map =
+            let (info : ArgumentInfo) = Map.find argumentName map
+            if info ^. _allowMultipleDefinitions = false
+            then Map.remove argumentName map
+            else map
+        let remainingArguments = Seq.foldBack remover providedArguments expectedArguments
+        remainingArguments
+        |> Seq.map (fun kvp ->
+            let name = kvp.Key
+            let assigner = kvp ^. (_value << _assigner)
+            kvp ^. (_value << _parser) >>= fun value ->
+                (Set.add name providedArguments, composite >> assigner value)
+                |> preturn
+        )
+        |> choice
+        >>= fun (provided, composite) ->
+            let eof = eof >>. preturn (provided, composite)
+            let next = pendingArgumentsParser (provided, composite)
+            (eof <?> "") <|> next
+    pendingArgumentsParser (Set.empty, id) >>= fun (specified, composite) ->
+        let missing = Set.difference required specified
+        if Set.isEmpty missing then preturn composite else
+        let missingString = String.concat ", " missing
+        fail $"The following required arguments are missing: {missingString}"

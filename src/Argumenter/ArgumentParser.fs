@@ -2,12 +2,12 @@
 
 open System
 open System.Reflection
+open FParsec
 open FSharpPlus
 open FSharpPlus.Lens
-open FParsec
 
 open Parsers
-open ParserData
+open ArgumentInfo
 
 module ArgumentParser =
     let Ok = Result.Ok
@@ -23,35 +23,39 @@ module ArgumentParser =
 
     let getArgumentInfo (info : PropertyInfo) = monad.strict {
         let t = info.PropertyType
+
         if info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = "NullableAttribute") then
             let! innerParser = getRawParser t
-            return {
-                 IsRequired = false
-                 ArgumentName = info.Name
-                 Parser = innerParser >>= assign (fun v o -> info.SetValue(o, v); o)
-            }
+            return
+                zero
+                |> _parser .-> argument info.Name innerParser
+                |> _assigner .-> (fun v o -> info.SetValue(o, v); o)
+                |> _isRequired .-> false
         elif t.IsGenericType then
             let genericTypeDefinition = t.GetGenericTypeDefinition()
             let firstGenericArgument = t.GetGenericArguments().[0]
             if genericTypeDefinition = typeof<Option<_>>.GetGenericTypeDefinition() then
                 let! innerParser = getRawParser firstGenericArgument
-                return {
-                     IsRequired = false
-                     ArgumentName = info.Name
-                     Parser = innerParser >>= assign (fun v o -> info.SetValue(o, Some v); o)
-                }
+                return
+                    zero
+                    |> _parser .-> argument info.Name innerParser
+                    |> _assigner .-> (fun v o ->
+                        let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
+                        info.SetValue(o, value)
+                        o
+                    )
+                    |> _isRequired .-> false
             else
                 return! Error "The only currently supported generic arguments are options."
         else
             let! parser = getRawParser t
-            return {
-                IsRequired = true
-                ArgumentName = info.Name
-                Parser = parser >>= assign (fun v o -> info.SetValue(o, v); o)
-            }
+            return
+                zero
+                |> _parser .-> argument info.Name parser
+                |> _assigner .-> (fun v o -> info.SetValue(o, v); o)
     }
     let parserResultToResult = function
-        | ParserResult.Success (result, state, _) -> Ok (result, state)
+        | ParserResult.Success (result, _, _) -> Ok result
         | ParserResult.Failure (message, _, _) -> Error message
 
 open ArgumentParser
@@ -61,11 +65,14 @@ type ArgumentParser() =
         let singleString = String.concat " " args
         this.Parse<'a>(singleString)
     member _.Parse<'a when 'a : (new : unit -> 'a)>(args : string) : Result<_, _> = monad.strict {
-        let! (argumentInfos : ArgumentInfo[]) =
+        let! argumentInfos =
             getProperties typeof<'a>
-            |> Array.map getArgumentInfo
+            |> Array.map (fun p -> getArgumentInfo p |> Result.map (fun i -> p.Name, i))
             |> sequence
+            |> Result.map (fun (infos : (string * ArgumentInfo)[]) -> infos |> Map.ofSeq)
         let parser = makeParser argumentInfos
-        let! _, data = runParserOnString parser zero "" args |> parserResultToResult
-        return (data ^. _assigner) (box (new 'a())) :?> 'a
+        let! assigner =
+            runParserOnString parser () "" args
+            |> parserResultToResult
+        return assigner (box (new 'a())) :?> 'a
     }

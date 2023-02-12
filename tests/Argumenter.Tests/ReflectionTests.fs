@@ -34,5 +34,9 @@ let reflectionTests = testList "Reflection" [
         let input = "--requiredString1 value1 --optionalString1 value3"
         let actual = ArgumentParser().Parse<RootArguments>(input)
         Expect.isError actual "Did not fail when optional arguments are missing"
+    testCase "Regular arguments cannot be added twice" <| fun _ ->
+        let input = "--requiredString1 value1 --requiredString1 value2 --requiredString2 value3"
+        let actual = ArgumentParser().Parse<RootArguments>(input)
+        Expect.isError actual "Did not fail when regular arguments are added twice"
 ]
 
