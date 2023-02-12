@@ -8,7 +8,7 @@ open FsCheck
 open Swensen.Unquote
 
 open Argumenter
-open Argumenter.Parser
+open Argumenter.Parsers
 
 let Ok = Result.Ok
 let Error = Result.Error
@@ -51,7 +51,7 @@ let stringArgumentTests = [
         let input = normalizeSingleWord argument
         let argumentName = normalizeSingleWord argumentName
         let expected = input.Split(' ', '\t', '\n', '\r').[0]
-        let parser = Parser.argument argumentName stringArgument
+        let parser = Parsers.argument argumentName stringArgument
         let actual =
             runParser parser $"--{argumentName} {input}"
             |> parserResultToResult
@@ -61,7 +61,7 @@ let stringArgumentTests = [
         let expected = normalizeSingleLine argument
         let input = "\"" + expected + "\""
         let argumentName = normalizeSingleWord argumentName
-        let parser = Parser.argument argumentName stringArgument
+        let parser = Parsers.argument argumentName stringArgument
         let actual =
             runParser parser $"--{argumentName} {input}"
             |> parserResultToResult

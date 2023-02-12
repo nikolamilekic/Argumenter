@@ -1,7 +1,7 @@
 ﻿using Argumenter;
 
 var rawArguments = Environment.GetCommandLineArgs();
-var result = new ArgumentParser()
+var result = new Argumenter.ArgumentParser()
     .Parse<Arguments>(rawArguments.Skip(1));
 
 if (result.IsOk)
