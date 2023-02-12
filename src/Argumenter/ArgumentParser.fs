@@ -61,9 +61,6 @@ module ArgumentParser =
 open ArgumentParser
 
 type ArgumentParser() =
-    member this.Parse<'a when 'a : (new : unit -> 'a)>(args : string seq) =
-        let singleString = String.concat " " args
-        this.Parse<'a>(singleString)
     member _.Parse<'a when 'a : (new : unit -> 'a)>(args : string) : Result<_, _> = monad.strict {
         let! argumentInfos =
             getProperties typeof<'a>
@@ -76,3 +73,7 @@ type ArgumentParser() =
             |> parserResultToResult
         return assigner (box (new 'a())) :?> 'a
     }
+    member this.Parse<'a when 'a : (new : unit -> 'a)>() : Result<_, _> =
+        let firstCommandLineArg = Environment.GetCommandLineArgs()[0]
+        let rawArguments = Environment.CommandLine[firstCommandLineArg.Length..].Trim()
+        this.Parse<'a>(rawArguments)

@@ -1,7 +1,5 @@
-var firstCommandLineArg = Environment.GetCommandLineArgs()[0];
-var rawArguments = Environment.CommandLine[firstCommandLineArg.Length..].Trim();
 var result = new Argumenter.ArgumentParser()
-    .Parse<Arguments>(rawArguments);
+    .Parse<Arguments>();
 
 if (result.IsOk)
 {
