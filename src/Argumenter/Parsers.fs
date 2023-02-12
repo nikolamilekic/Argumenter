@@ -28,7 +28,6 @@ let getRawParser (t : Type) : Result<Parser<_, _>, _> = monad.strict {
 }
 let argument (name : string) parser =
     skipStringCI $"--{name}" >>. spaces1 >>. parser
-    <?> $"--{name.ToLower()}"
 let makeParser expectedArguments : Parser<obj -> obj, _> =
     let inline _key f (s : KeyValuePair<'k ,'v>) = s.Key |> f
     let inline _value f (s : KeyValuePair<'k ,'v>) = s.Value |> f
@@ -46,11 +45,13 @@ let makeParser expectedArguments : Parser<obj -> obj, _> =
         let remainingArguments = Seq.foldBack remover providedArguments expectedArguments
         remainingArguments
         |> Seq.map (fun kvp ->
-            let name = kvp.Key
+            let (name : string) = kvp.Key
+            let required = kvp ^. (_value << _isRequired)
             let assigner = kvp ^. (_value << _assigner)
-            kvp ^. (_value << _parser) >>= fun value ->
+            kvp ^. (_value << _parser) >>= (fun value ->
                 (Set.add name providedArguments, composite >> assigner value)
-                |> preturn
+                |> preturn)
+            <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]"
         )
         |> choice
         >>= fun (provided, composite) ->
