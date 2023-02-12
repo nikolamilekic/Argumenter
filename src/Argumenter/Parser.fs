@@ -19,12 +19,18 @@ let inline _specifiedArguments f s =
 let inline _assigner f s =
     s.Assigner |> f <&> fun x -> { s with Assigner = x }
 
-let singleWordString<'a> : Parser<_, 'a> = many1CharsTill anyChar (spaces1 <|> eof)
-let multiWordString<'a> : Parser<_, 'a> = skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
+let singleWordString<'a> : Parser<_, 'a> =
+    notFollowedByString "--"
+    >>. notFollowedByString "\""
+    >>. many1CharsTill anyChar (spaces1 <|> eof)
+    <?> "single word value"
+let multiWordString<'a> : Parser<_, 'a> =
+    skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
+    <?> "multi word value surrounded by quotes"
 let stringArgument<'a> : Parser<_, 'a> = (multiWordString <|> singleWordString)
 
 let argument name parser =
-    skipStringCI $"--{name}" >>? spaces1 >>? parser
+    skipStringCI $"--{name}" >>. spaces1 >>. parser
     .>> updateUserState (_specifiedArguments %-> Set.add name)
 let assign assigner value =
     updateUserState (_assigner %-> (fun a -> a >> assigner value))

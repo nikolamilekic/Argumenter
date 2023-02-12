@@ -86,7 +86,7 @@ type ArgumentParser() =
             |> Array.map (fun info -> argument info.ArgumentName info.Parser)
             |> choice
             |> many
-            .>> eof
+            .>> (eof <?> "")
             .>> validateRequiredArguments requiredArguments
         let! _, data = runParserOnString parser zero "" args |> parserResultToResult
         return (data ^. _assigner) (box (new 'a())) :?> 'a
