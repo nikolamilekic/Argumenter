@@ -22,6 +22,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Argumenter", "src\Argumente
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Argumenter.Tests", "tests\Argumenter.Tests\Argumenter.Tests.fsproj", "{2B8AAC5E-A2EE-40DA-9956-7D423DEFD8B8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample", "Sample\Sample.csproj", "{75FA66EE-79DE-40CE-889F-2BAD4D1758D9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,5 +41,9 @@ Global
 		{2B8AAC5E-A2EE-40DA-9956-7D423DEFD8B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2B8AAC5E-A2EE-40DA-9956-7D423DEFD8B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2B8AAC5E-A2EE-40DA-9956-7D423DEFD8B8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{75FA66EE-79DE-40CE-889F-2BAD4D1758D9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{75FA66EE-79DE-40CE-889F-2BAD4D1758D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{75FA66EE-79DE-40CE-889F-2BAD4D1758D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{75FA66EE-79DE-40CE-889F-2BAD4D1758D9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

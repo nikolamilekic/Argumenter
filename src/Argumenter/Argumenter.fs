@@ -35,7 +35,14 @@ module ArgumentParser =
     }
     let getParserInfo (info : PropertyInfo) = monad.strict {
         let t = info.PropertyType
-        if t.IsGenericType then
+        if info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = "NullableAttribute") then
+            let! innerParser = getRawParser t
+            return {
+                 IsRequired = false
+                 ArgumentName = info.Name
+                 Parser = innerParser >>= assign (fun v o -> info.SetValue(o, v); o)
+            }
+        elif t.IsGenericType then
             if t.GetGenericTypeDefinition() = optionGenericTypeDefinition then
                 let innerType = t.GetGenericArguments().[0]
                 let! innerParser = getRawParser innerType
@@ -61,7 +68,7 @@ module ArgumentParser =
 open ArgumentParser
 
 type ArgumentParser() =
-    member this.Parse<'a when 'a : (new : unit -> 'a)>(args : string[]) =
+    member this.Parse<'a when 'a : (new : unit -> 'a)>(args : string seq) =
         let singleString = String.concat " " args
         this.Parse<'a>(singleString)
     member _.Parse<'a when 'a : (new : unit -> 'a)>(args : string) : Result<_, _> = monad.strict {
