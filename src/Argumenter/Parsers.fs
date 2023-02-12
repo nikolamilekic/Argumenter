@@ -48,7 +48,8 @@ let makeParser expectedArguments : Parser<obj -> obj, _> =
             let (name : string) = kvp.Key
             let required = kvp ^. (_value << _isRequired)
             let assigner = kvp ^. (_value << _assigner)
-            kvp ^. (_value << _parser) >>= (fun value ->
+            let parser = kvp ^. (_value << _parser)
+            spaces >>. parser .>> spaces >>= (fun value ->
                 (Set.add name providedArguments, composite >> assigner value)
                 |> preturn)
             <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]"
