@@ -12,13 +12,25 @@ module LensExtensions =
 
 type ParserState =
     {
-        SupportedArguments : Map<string, ArgumentInfo>
+        CurrentCommand : CommandInfo
+        AllCommands : CommandInfo list
         Assigners : Map<string, obj -> unit>
     }
     with
     static member Zero = {
-        SupportedArguments = Map.empty
+        AllCommands = []
+        CurrentCommand = {
+            Command = ""
+            Parent = None
+            SupportedArguments = Map.empty
+        }
         Assigners = Map.empty
+    }
+and CommandInfo =
+    {
+        Command : string
+        Parent : CommandInfo option
+        SupportedArguments : Map<string, ArgumentInfo>
     }
 and ArgumentInfo =
     {
@@ -47,8 +59,10 @@ module ArgumentInfo =
 open ArgumentInfo
 
 module ParserState =
-    let inline _supportedArguments f s =
-        s.SupportedArguments |> f <&> fun v -> { s with SupportedArguments = v }
+    let inline _currentCommand f s =
+        s.CurrentCommand |> f <&> fun v -> { s with CurrentCommand = v }
+    let inline _allCommands f s =
+        s.AllCommands |> f <&> fun v -> { s with AllCommands = v }
     let inline _assigners f s : Const<_, _> = s.Assigners |> f
 
     // ArgumentInfo from SupportedArguments KVP
@@ -58,30 +72,49 @@ module ParserState =
         _value << _allowMultipleDefinitions <| f
     let inline _argument_parser f : _ -> Const<_, _> =
         _value << _parser <| f
+    let inline _argument_assigner f : _ -> Const<_, _> =
+        _value << _assigner <| f
 
-    let inline _assign name f s : Identity<_> =
+    let inline _assign kvp f s : Identity<_> =
+        let name = kvp ^. _key
+        let assigner = kvp ^. _argument_assigner
         f ignore <&> fun v ->
-            let assigner = s ^. (_supportedArguments << Map._item name << _Some << _assigner)
             { s with Assigners = s.Assigners.Add(name, fun o -> assigner(o, v)) }
     let inline _assigned name f s : Const<_, _> =
         s ^. (_assigners << Map._item name)
         |> Option.isSome
         |> f
+    let inline _allSupportedArguments f s : Const<_, _> =
+        let rec getSupportedArguments command = seq {
+            yield! command.SupportedArguments
+            match command.Parent with
+            | None -> ()
+            | Some parent -> yield! getSupportedArguments parent
+        }
+        getSupportedArguments (s ^. _currentCommand) |> f
     let inline _missingArguments f s : Const<_, _> =
-        s.SupportedArguments
-        |> Seq.filter (fun sa ->
-            let isRequired = sa ^. _argument_isRequired
-            let name = sa ^. _key
+        s ^. _allSupportedArguments
+        |> Seq.filter (fun kvp ->
+            let isRequired = kvp ^. _argument_isRequired
+            let name = kvp ^. _key
             let assigned = s ^. _assigned name
             isRequired && not assigned)
-        |> Seq.map (view _key)
+        |> Seq.map (view _key >> String.toLower)
         |> f
-    let inline _pendingArguments f s =
-        s.SupportedArguments
+    let inline _pendingArguments f s : Const<_, _> =
+        s ^. _allSupportedArguments
         |> Seq.filter (fun sa ->
             let allowMultipleSelection = sa ^. _argument_allowMultipleDefinitions
             let name = sa ^. _key
             let assigned = s ^. _assigned name
             allowMultipleSelection || not assigned
         )
+        |> f
+    let inline _pendingCommands f s : Const<_, _> =
+        let currentCommand = s ^. _currentCommand
+        s ^. _allCommands
+        |> Seq.filter (fun c ->
+            match c.Parent with
+            | Some x when LanguagePrimitives.PhysicalEquality x currentCommand -> true
+            | _ -> false)
         |> f

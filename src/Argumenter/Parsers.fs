@@ -19,24 +19,32 @@ let multiWordString<'a> : Parser<_, 'a> =
     skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
     <?> "multi word value surrounded by quotes"
 let stringArgument<'a> : Parser<_, 'a> = (multiWordString <|> singleWordString)
-let getRawParser (t : Type) : Result<Parser<_, _>, _> = monad.strict {
-    if (t = typeof<string>) then
-        return stringArgument |>> box
+let getRawParser (t : Type) =
+    if t = typeof<string> then
+        stringArgument |>> box
     else
-        return! Error $"{t.FullName} is not a supported argument type."
-}
+        failwith $"{t.Name} is not a supported argument type."
 let argument (name : string) parser =
     skipStringCI $"--{name}" >>. spaces1 >>. parser
 let parser : Parser<unit, ParserState> =
     let rec pendingArgumentsParser () = getUserState >>= fun state ->
-        state ^. _pendingArguments
-        |> Seq.map (fun kvp ->
-            let name = kvp ^. _key
-            let required = kvp ^. _argument_isRequired
-            let parser = kvp ^. _argument_parser
-            spaces >>. parser .>> spaces >>= (fun value ->
-                updateUserState (_assign name .-> value))
-            <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
+        let argumentParsers =
+            state ^. _pendingArguments
+            |> Seq.map (fun kvp ->
+                let name = kvp ^. _key
+                let required = kvp ^. _argument_isRequired
+                let parser = kvp ^. _argument_parser
+                spaces >>. parser .>> spaces >>= (fun value ->
+                    updateUserState (_assign kvp .-> value))
+                <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
+        let commandParsers =
+            state ^. _pendingCommands
+            |> Seq.map (fun command ->
+                spaces >>. pstringCI command.Command >>. spaces >>= (fun () ->
+                    updateUserState (_currentCommand .-> command))
+                <?> $"{command.Command.ToLower()}")
+        argumentParsers
+        |> Seq.append commandParsers
         |> choice
         >>= fun () -> (eof <?> "") <|> pendingArgumentsParser ()
     pendingArgumentsParser () >>. getUserState >>= fun state ->
