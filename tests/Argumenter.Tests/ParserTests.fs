@@ -2,15 +2,12 @@
 
 open Expecto
 open FSharpPlus
-open FSharpPlus.Lens
 open Milekic.YoLo
 open FParsec
 open FsCheck
-open Swensen.Unquote
 
 open Argumenter
 open Parsers
-open ArgumentInfo
 
 let Ok = Result.Ok
 let Error = Result.Error
@@ -73,6 +70,6 @@ let stringArgumentTests = [
 ]
 
 [<Tests>]
-let parserTests = testList "Parser" [
+let parserTests = testList "Parsers" [
     testList "stringArgument" stringArgumentTests
 ]

@@ -2,9 +2,9 @@
 
 open System
 open System.Reflection
-open FParsec
 open FSharpPlus
 open FSharpPlus.Lens
+open FParsec
 
 open Parsers
 open ArgumentInfo
@@ -21,6 +21,34 @@ type ArgumentParser<'a>() =
     let Ok = Result.Ok
     let Error = Result.Error
 
+    let parser : Parser<unit, ParserState> =
+        let rec pendingArgumentsParser () = getUserState >>= fun state ->
+            let argumentParsers =
+                state ^. _pendingArguments
+                |> Seq.map (fun kvp ->
+                    let name = kvp ^. _key
+                    let required = kvp ^. _argument_isRequired
+                    let parser = kvp ^. _argument_parser
+                    spaces >>. parser .>> spaces >>= (fun value ->
+                        updateUserState (_assign kvp .-> value))
+                    <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
+            let commandParsers =
+                state ^. _pendingCommands
+                |> Seq.map (fun command ->
+                    spaces >>. pstringCI command.Command >>. spaces >>= (fun () ->
+                        updateUserState (_currentCommand .-> command))
+                    <?> $"{command.Command.ToLower()}")
+            argumentParsers
+            |> Seq.append commandParsers
+            |> choice
+            >>= fun () -> (eof <?> "") <|> pendingArgumentsParser ()
+        pendingArgumentsParser () >>. getUserState >>= fun state ->
+            match state ^. _missingArguments |> Seq.toList with
+            | [] -> preturn ()
+            | missing ->
+                let missingString = String.concat ", " missing
+                fail $"The following required arguments are missing: {missingString}"
+
     let getProperties (t : Type) =
         t.GetProperties(
             BindingFlags.Public
@@ -29,12 +57,17 @@ type ArgumentParser<'a>() =
             ||| BindingFlags.GetProperty
             ||| BindingFlags.SetProperty
         )
+    let getBuiltInParser (t : Type) =
+        if t = typeof<string> then
+            stringArgument |>> box
+        else
+            failwith $"{t.Name} is not a supported argument type."
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
         if info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = "NullableAttribute") then
             zero
-            |> _parser .-> argument info.Name (getRawParser t)
+            |> _parser .-> argument info.Name (getBuiltInParser t)
             |> _assigner .-> info.SetValue
             |> _isRequired .-> false
         elif t.IsGenericType then
@@ -42,7 +75,7 @@ type ArgumentParser<'a>() =
             let firstGenericArgument = t.GetGenericArguments().[0]
             if genericTypeDefinition = typeof<Option<_>>.GetGenericTypeDefinition() then
                 zero
-                |> _parser .-> argument info.Name (getRawParser firstGenericArgument)
+                |> _parser .-> argument info.Name (getBuiltInParser firstGenericArgument)
                 |> _assigner .-> (fun (o, v) ->
                     let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                     info.SetValue(o, value)
@@ -51,7 +84,7 @@ type ArgumentParser<'a>() =
             else failwith "The only currently supported generic arguments are options."
         else
             zero
-            |> _parser .-> argument info.Name (getRawParser t)
+            |> _parser .-> argument info.Name (getBuiltInParser t)
             |> _assigner .-> info.SetValue
     let rec getCommandInfos results = function
         | [] -> results
@@ -73,7 +106,7 @@ type ArgumentParser<'a>() =
                 |> Seq.filter (fun t ->
                     t.BaseType = currentType &&
                     isNull (t.GetConstructor([||])) = false)
-                |>> (fun t -> t, Some currentCommandInfo)
+                |> Seq.map (fun t -> t, Some currentCommandInfo)
                 |> Seq.toList
             getCommandInfos ((currentCommandInfo, currentType)::results) (children @ next)
     let commandTypes = getCommandInfos [] [(typeof<'a>, None)]
