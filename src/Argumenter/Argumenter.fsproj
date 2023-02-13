@@ -11,7 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="paket.references" />
-    <Compile Include="ArgumentInfo.fs" />
+    <Compile Include="ParserState.fs" />
     <Compile Include="Parsers.fs" />
     <Compile Include="ArgumentParser.fs" />
   </ItemGroup>

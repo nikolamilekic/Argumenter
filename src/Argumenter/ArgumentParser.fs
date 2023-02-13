@@ -8,6 +8,7 @@ open FSharpPlus.Lens
 
 open Parsers
 open ArgumentInfo
+open ParserState
 
 module ArgumentParser =
     let Ok = Result.Ok
@@ -29,7 +30,7 @@ module ArgumentParser =
             return
                 zero
                 |> _parser .-> argument info.Name innerParser
-                |> _assigner .-> (fun v o -> info.SetValue(o, v); o)
+                |> _assigner .-> info.SetValue
                 |> _isRequired .-> false
         elif t.IsGenericType then
             let genericTypeDefinition = t.GetGenericTypeDefinition()
@@ -39,10 +40,9 @@ module ArgumentParser =
                 return
                     zero
                     |> _parser .-> argument info.Name innerParser
-                    |> _assigner .-> (fun v o ->
+                    |> _assigner .-> (fun (o, v) ->
                         let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                         info.SetValue(o, value)
-                        o
                     )
                     |> _isRequired .-> false
             else
@@ -52,11 +52,8 @@ module ArgumentParser =
             return
                 zero
                 |> _parser .-> argument info.Name parser
-                |> _assigner .-> (fun v o -> info.SetValue(o, v); o)
+                |> _assigner .-> info.SetValue
     }
-    let parserResultToResult = function
-        | ParserResult.Success (result, _, _) -> Ok result
-        | ParserResult.Failure (message, _, _) -> Error message
 
 open ArgumentParser
 
@@ -67,11 +64,17 @@ type ArgumentParser() =
             |> Array.map (fun p -> getArgumentInfo p |> Result.map (fun i -> p.Name, i))
             |> sequence
             |> Result.map (fun (infos : (string * ArgumentInfo)[]) -> infos |> Map.ofSeq)
-        let parser = makeParser argumentInfos
-        let! assigner =
-            runParserOnString parser () "" args
-            |> parserResultToResult
-        return assigner (box (new 'a())) :?> 'a
+        let parserState =
+            zero
+            |> _supportedArguments .-> argumentInfos
+        let! result =
+            match runParserOnString parser parserState "" args with
+            | ParserResult.Success (_, state, _) -> Ok state
+            | ParserResult.Failure (message, _, _) -> Error message
+
+        let object = new 'a()
+        for assigner in (result ^. _assigners).Values do assigner object
+        return object
     }
     member this.Parse<'a when 'a : (new : unit -> 'a)>() : Result<_, _> =
         let firstCommandLineArg = Environment.GetCommandLineArgs()[0]
