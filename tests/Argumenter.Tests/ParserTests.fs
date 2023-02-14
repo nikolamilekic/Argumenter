@@ -34,7 +34,8 @@ let normalizeSingleLine (NonEmptyString s) =
         .Replace("\r\n", "\n")
         .Replace("\r", "\n")
 
-let stringArgumentTests = [
+[<Tests>]
+let parserTests = testList "Parsers" [
     testProperty "singleWordString raw parser" <| fun s ->
         let input = normalizeSingleWord s
         let expected = input.Split(' ', '\t', '\n', '\r').[0]
@@ -47,29 +48,4 @@ let stringArgumentTests = [
         let actual = runUnitParser multiWordString input |> parserResultToResult
         let result = actual = Ok expected
         result
-    testProperty "singleWordString" <| fun argumentName argument ->
-        let input = normalizeSingleWord argument
-        let argumentName = normalizeSingleWord argumentName
-        let expected = input.Split(' ', '\t', '\n', '\r').[0]
-        let parser = Parsers.argument argumentName stringArgument
-        let actual =
-            runUnitParser parser $"--{argumentName} {input}"
-            |> parserResultToResult
-        let result = actual = Ok expected
-        result
-    testProperty "multiWordString" <| fun argumentName argument ->
-        let expected = normalizeSingleLine argument
-        let input = "\"" + expected + "\""
-        let argumentName = normalizeSingleWord argumentName
-        let parser = Parsers.argument argumentName stringArgument
-        let actual =
-            runUnitParser parser $"--{argumentName} {input}"
-            |> parserResultToResult
-        let result = actual = Ok expected
-        result
-]
-
-[<Tests>]
-let parserTests = testList "Parsers" [
-    testList "stringArgument" stringArgumentTests
 ]

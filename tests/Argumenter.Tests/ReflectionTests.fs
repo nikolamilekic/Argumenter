@@ -17,7 +17,6 @@ type RootArguments() =
             this.RequiredString2 = other.RequiredString2 &&
             this.OptionalString1 = other.OptionalString1
         | _ -> false
-
 type ChildArguments() =
     inherit RootArguments()
     member val ChildArgument1 = "" with get, set
@@ -28,7 +27,6 @@ type ChildArguments() =
             base.Equals(other) &&
             this.ChildArgument1 = other.ChildArgument1
         | _ -> false
-
 type MultipleArguments() =
     member val MultipleStringList : ResizeArray<string> = ResizeArray() with get, set
     override _.GetHashCode() = 0
@@ -36,6 +34,15 @@ type MultipleArguments() =
         match other with
         | :? MultipleArguments as other ->
             this.MultipleStringList.SequenceEqual(other.MultipleStringList)
+        | _ -> false
+type MainArgument() =
+    [<MainArgument>]
+    member val Main = "" with get, set
+    override _.GetHashCode() = 0
+    override this.Equals(other : obj) =
+        match other with
+        | :? MainArgument as other ->
+            this.Main = other.Main
         | _ -> false
 
 [<Tests>]
@@ -68,6 +75,15 @@ let reflectionTests = testList "Reflection" [
         let expected = MultipleArguments(MultipleStringList=ResizeArray(["value1"; "value2"; "value3"]))
         let actual = ArgumentParser<MultipleArguments>().Parse(input)
         actual =! Ok expected
-
+    testCase "Main argument is parsed correctly without full name" <| fun _ ->
+        let input = "value1"
+        let expected = MainArgument(Main="value1")
+        let actual = ArgumentParser<MainArgument>().Parse(input)
+        actual =! Ok expected
+    testCase "Main argument is parsed correctly with full name" <| fun _ ->
+        let input = "--main value1"
+        let expected = MainArgument(Main="value1")
+        let actual = ArgumentParser<MainArgument>().Parse(input)
+        actual =! Ok expected
 ]
 

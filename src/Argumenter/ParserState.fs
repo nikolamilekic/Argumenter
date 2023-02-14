@@ -1,5 +1,6 @@
 ﻿namespace Argumenter
 
+open System
 open System.Collections.Generic
 open FSharpPlus
 open FSharpPlus.Data
@@ -10,6 +11,38 @@ module LensExtensions =
     let inline _key f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Key |> f
     let inline _value f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Value |> f
 
+type ArgumentInfo =
+    {
+        IsRequired : bool
+        Assigner : obj * obj -> unit
+        Type : Type
+        AllowMultipleDefinitions : bool
+        IsMainArgument : bool
+    }
+    with
+    static member Zero = {
+        IsRequired = true
+        Assigner = ignore
+        Type = typeof<string>
+        AllowMultipleDefinitions = false
+        IsMainArgument = false
+    }
+module ArgumentInfo =
+    let inline _isRequired f s =
+        s.IsRequired |> f <&> fun v -> { s with IsRequired = v }
+    let inline _type f s =
+        s.Type |> f <&> fun v -> { s with Type = v }
+    let inline _allowMultipleDefinitions f s =
+        s.AllowMultipleDefinitions |> f <&> fun v -> { s with AllowMultipleDefinitions = v }
+    let inline _assigner f s = s.Assigner |> f <&> fun v -> { s with Assigner = v }
+    let inline _isMainArgument f s =
+        s.IsMainArgument |> f <&> fun v -> { s with IsMainArgument = v }
+type CommandInfo =
+    {
+        Command : string
+        Parent : CommandInfo option
+        SupportedArguments : Map<string, ArgumentInfo>
+    }
 type ParserState =
     {
         CurrentCommand : CommandInfo
@@ -26,35 +59,6 @@ type ParserState =
         }
         Assigners = Map.empty
     }
-and CommandInfo =
-    {
-        Command : string
-        Parent : CommandInfo option
-        SupportedArguments : Map<string, ArgumentInfo>
-    }
-and ArgumentInfo =
-    {
-        IsRequired : bool
-        Assigner : obj * obj -> unit
-        Parser : FParsec.Primitives.Parser<obj, ParserState>
-        AllowMultipleDefinitions : bool
-    }
-    with
-    static member Zero = {
-        IsRequired = true
-        Assigner = ignore
-        Parser = FParsec.Primitives.preturn null
-        AllowMultipleDefinitions = false
-    }
-
-module ArgumentInfo =
-    let inline _isRequired f s =
-        s.IsRequired |> f <&> fun v -> { s with IsRequired = v }
-    let inline _parser f s =
-        s.Parser |> f <&> fun v -> { s with Parser = v }
-    let inline _allowMultipleDefinitions f s =
-        s.AllowMultipleDefinitions |> f <&> fun v -> { s with AllowMultipleDefinitions = v }
-    let inline _assigner f s = s.Assigner |> f <&> fun v -> { s with Assigner = v }
 
 open ArgumentInfo
 
@@ -70,10 +74,12 @@ module ParserState =
         _value << _isRequired <| f
     let inline _argument_allowMultipleDefinitions f : _ -> Const<_, _> =
         _value << _allowMultipleDefinitions <| f
-    let inline _argument_parser f : _ -> Const<_, _> =
-        _value << _parser <| f
+    let inline _argument_type f : _ -> Const<_, _> =
+        _value << _type <| f
     let inline _argument_assigner f : _ -> Const<_, _> =
         _value << _assigner <| f
+    let inline _argument_isMainArgument f : _ -> Const<_, _> =
+        _value << _isMainArgument <| f
 
     let inline _assign kvp f s : Identity<_> =
         let name = kvp ^. _key

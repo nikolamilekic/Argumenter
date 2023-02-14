@@ -21,6 +21,12 @@ type ArgumentParser<'a>() =
     let Ok = Result.Ok
     let Error = Result.Error
 
+    let getBuiltInParser (t : Type) =
+        if t = typeof<string> then
+            stringArgument |>> box
+        else
+            failwith $"{t.Name} is not a supported argument type."
+
     let parser : Parser<unit, ParserState> =
         let rec pendingArgumentsParser () = getUserState >>= fun state ->
             let argumentParsers =
@@ -28,8 +34,16 @@ type ArgumentParser<'a>() =
                 |> Seq.map (fun kvp ->
                     let name = kvp ^. _key
                     let required = kvp ^. _argument_isRequired
-                    let parser = kvp ^. _argument_parser
-                    spaces >>. parser .>> spaces >>= (fun value ->
+                    let isMainArgument = kvp ^. _argument_isMainArgument
+                    let contentParser = getBuiltInParser (kvp ^. _argument_type)
+                    let fullArgumentParser =
+                        skipStringCI $"--{name}" >>. spaces1 >>. contentParser
+                    let finalParser =
+                        if isMainArgument then contentParser <|> fullArgumentParser
+                        else fullArgumentParser
+
+                    spaces >>. finalParser .>> spaces
+                    >>= (fun value ->
                         updateUserState (_assign kvp .-> value))
                     <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
             let commandParsers =
@@ -59,33 +73,36 @@ type ArgumentParser<'a>() =
             ||| BindingFlags.GetProperty
             ||| BindingFlags.SetProperty
         )
-    let getBuiltInParser (t : Type) =
-        if t = typeof<string> then
-            stringArgument |>> box
-        else
-            failwith $"{t.Name} is not a supported argument type."
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
-        if info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = "NullableAttribute") then
+        getBuiltInParser t |> ignore // Check if the type is supported. Will throw if not.
+
+        let containsAttribute name =
+            info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = name)
+
+        let result =
             zero
-            |> _parser .-> argument info.Name (getBuiltInParser t)
+            |> _isMainArgument .-> containsAttribute "MainArgumentAttribute"
+            |> _type .-> t
             |> _assigner .-> info.SetValue
-            |> _isRequired .-> false
+
+        if containsAttribute "NullableAttribute" then
+            result |> _isRequired .-> false
         elif t.IsGenericType then
             let genericTypeDefinition = t.GetGenericTypeDefinition()
             let firstGenericArgument = t.GetGenericArguments().[0]
             if genericTypeDefinition = typeof<Option<_>>.GetGenericTypeDefinition() then
-                zero
-                |> _parser .-> argument info.Name (getBuiltInParser firstGenericArgument)
+                result
+                |> _type .-> firstGenericArgument
                 |> _assigner .-> (fun (o, v) ->
                     let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                     info.SetValue(o, value)
                 )
                 |> _isRequired .-> false
             elif genericTypeDefinition = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition() then
-                zero
-                |> _parser .-> argument info.Name (getBuiltInParser firstGenericArgument)
+                result
+                |> _type .-> firstGenericArgument
                 |> _assigner .-> (fun (o, v) ->
                     let list = info.GetValue(o) :?> System.Collections.IList
                     list.Add(v) |> ignore
@@ -93,10 +110,7 @@ type ArgumentParser<'a>() =
                 |> _isRequired .-> false
                 |> _allowMultipleDefinitions .-> true
             else failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
-        else
-            zero
-            |> _parser .-> argument info.Name (getBuiltInParser t)
-            |> _assigner .-> info.SetValue
+        else result
     let rec getCommandInfos results = function
         | [] -> results
         | (currentType, parent)::next ->

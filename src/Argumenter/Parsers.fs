@@ -11,5 +11,4 @@ let multiWordString<'a> : Parser<_, 'a> =
     skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
     <?> "multi word value surrounded by quotes"
 let stringArgument<'a> : Parser<_, 'a> = (multiWordString <|> singleWordString)
-let argument (name : string) parser =
-    skipStringCI $"--{name}" >>. spaces1 >>. parser
+
