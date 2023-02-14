@@ -1,6 +1,7 @@
 ﻿namespace Argumenter
 
 open System
+open System.ComponentModel.DataAnnotations
 open System.Reflection
 open FSharpPlus
 open FSharpPlus.Lens
@@ -76,43 +77,46 @@ type ArgumentParser<'a>() =
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
-        let containsAttribute (memberInfo : MemberInfo) name =
-            memberInfo.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = name)
+        let isNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
+        let isOption = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Option<_>>.GetGenericTypeDefinition()
+        let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition()
+        let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
+        let mainArgumentAttributeSet = isNull (info.GetCustomAttribute(typeof<MainArgumentAttribute>)) = false
 
         let result =
             zero
-            |> _isMainArgument .-> containsAttribute info "MainArgumentAttribute"
+            |> _isMainArgument .-> mainArgumentAttributeSet
             |> _type .-> t
             |> _assigner .-> info.SetValue
-            |> _requiredIf .->
+            |> _requiredment .->
+                if requiredAttributeSet then AlwaysRequired else
                 match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
-                | null -> None
-                | :? RequiredIfAttribute as x -> Some (x.ArgumentName, x.Value)
-                | _ -> None
+                | :? RequiredIfAttribute as x -> RequiredIf (x.ArgumentName, x.Value)
+                | _ ->
+                    if isNullable || isOption || isGenericList
+                    then Optional
+                    else AlwaysRequired
 
-        if NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable then
-            result |> _isAlwaysRequired .-> false
-        elif t.IsGenericType then
-            let genericTypeDefinition = t.GetGenericTypeDefinition()
+        if isOption then
             let firstGenericArgument = t.GetGenericArguments().[0]
-            if genericTypeDefinition = typeof<Option<_>>.GetGenericTypeDefinition() then
-                result
-                |> _type .-> firstGenericArgument
-                |> _assigner .-> (fun (o, v) ->
-                    let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
-                    info.SetValue(o, value)
-                )
-                |> _isAlwaysRequired .-> false
-            elif genericTypeDefinition = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition() then
-                result
-                |> _type .-> firstGenericArgument
-                |> _assigner .-> (fun (o, v) ->
-                    let list = info.GetValue(o) :?> System.Collections.IList
-                    list.Add(v) |> ignore
-                )
-                |> _isAlwaysRequired .-> false
-                |> _allowMultipleDefinitions .-> true
-            else failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
+            result
+            |> _type .-> firstGenericArgument
+            |> _assigner .-> (fun (o, v) ->
+                let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
+                info.SetValue(o, value)
+            )
+        elif isGenericList then
+            if isNullable || isOption then failwith "Generic lists cannot be nullable or options." else
+
+            result
+            |> _type .-> t.GetGenericArguments().[0]
+            |> _assigner .-> (fun (o, v) ->
+                let list = info.GetValue(o) :?> System.Collections.IList
+                list.Add(v) |> ignore
+            )
+            |> _allowMultipleDefinitions .-> true
+        elif t.IsGenericType then
+            failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
         else result
         |> fun result ->
             getContentParser (result ^. _type) |> ignore // Check if the type is supported. Will throw if not.

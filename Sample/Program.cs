@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Argumenter;
 
 var result = new ArgumentParser<Arguments>().Parse();
@@ -28,6 +29,8 @@ public record Arguments
 public record ChildCommandArguments : Arguments
 {
     public string ChildArgument { get; set; } = "";
+
+    [Required]
     public List<string> Multiple { get; } = new();
 
     public override string ToString()

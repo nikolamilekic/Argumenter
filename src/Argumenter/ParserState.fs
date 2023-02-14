@@ -11,10 +11,16 @@ module LensExtensions =
     let inline _key f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Key |> f
     let inline _value f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Value |> f
 
+type ArgumentRequirement =
+    | AlwaysRequired
+    | RequiredIf of string * obj
+    | Optional
+    with
+    static member Zero = AlwaysRequired
+
 type ArgumentInfo =
     {
-        IsAlwaysRequired : bool
-        RequiredIf : (string * obj) option
+        Requirement : ArgumentRequirement
         Assigner : obj * obj -> unit
         Type : Type
         AllowMultipleDefinitions : bool
@@ -22,26 +28,15 @@ type ArgumentInfo =
     }
     with
     static member Zero = {
-        IsAlwaysRequired = true
-        RequiredIf = None
+        Requirement = zero
         Assigner = ignore
         Type = typeof<string>
         AllowMultipleDefinitions = false
         IsMainArgument = false
     }
 module ArgumentInfo =
-    let inline _isAlwaysRequired f s =
-        s.IsAlwaysRequired |> f <&> fun v -> {
-            s with
-                IsAlwaysRequired = v
-                RequiredIf = if v then None else s.RequiredIf
-        }
-    let inline _requiredIf f s =
-        s.RequiredIf |> f <&> fun v -> {
-            s with
-                RequiredIf = v
-                IsAlwaysRequired = if v.IsSome then false else s.IsAlwaysRequired
-        }
+    let inline _requiredment f s =
+        s.Requirement |> f <&> fun v -> { s with Requirement = v }
     let inline _type f s =
         s.Type |> f <&> fun v -> { s with Type = v }
     let inline _allowMultipleDefinitions f s =
@@ -116,9 +111,10 @@ module ParserState =
         }
         getSupportedArguments (s ^. _currentCommand) |> f
     let inline _isRequired argumentInfo f s : Const<_, _> =
-        match argumentInfo ^. _isAlwaysRequired, argumentInfo ^. _requiredIf with
-        | true, _ -> true
-        | false, Some (name, value) ->
+        match argumentInfo ^. _requiredment with
+        | AlwaysRequired -> true
+        | Optional -> false
+        | RequiredIf (name, value) ->
             match s.AssignedValues.TryFind name with
             | None -> false
             | Some (_, values) ->
@@ -131,7 +127,6 @@ module ParserState =
                             StringComparison.OrdinalIgnoreCase))
                     |> Option.isSome
                 else values |> List.contains value
-        | false, None -> false
         |> f
     let inline _missingArguments f s : Const<_, _> =
         s ^. _allSupportedArguments
