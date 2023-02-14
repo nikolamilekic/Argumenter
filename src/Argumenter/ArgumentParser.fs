@@ -35,8 +35,10 @@ type ArgumentParser<'a>() =
             let commandParsers =
                 state ^. _pendingCommands
                 |> Seq.map (fun command ->
-                    spaces >>. pstringCI command.Command >>. spaces >>= (fun () ->
-                        updateUserState (_currentCommand .-> command))
+                    spaces
+                    >>. (pstringCI command.Command <|> pstringCI $"--{command.Command}")
+                    >>. spaces
+                    >>= (fun () -> updateUserState (_currentCommand .-> command))
                     <?> $"{command.Command.ToLower()}")
             argumentParsers
             |> Seq.append commandParsers
