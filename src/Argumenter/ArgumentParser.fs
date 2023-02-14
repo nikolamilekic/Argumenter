@@ -21,7 +21,7 @@ type ArgumentParser<'a>() =
     let Ok = Result.Ok
     let Error = Result.Error
 
-    let getBuiltInParser (t : Type) =
+    let getContentParser (t : Type) =
         if t = typeof<string> then
             stringArgument |>> box
         else
@@ -35,7 +35,7 @@ type ArgumentParser<'a>() =
                     let name = kvp ^. _key
                     let required = kvp ^. _argument_isRequired
                     let isMainArgument = kvp ^. _argument_isMainArgument
-                    let contentParser = getBuiltInParser (kvp ^. _argument_type)
+                    let contentParser = getContentParser (kvp ^. _argument_type)
                     let fullArgumentParser =
                         skipStringCI $"--{name}" >>. spaces1 >>. contentParser
                     let finalParser =
@@ -76,8 +76,6 @@ type ArgumentParser<'a>() =
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
-        getBuiltInParser t |> ignore // Check if the type is supported. Will throw if not.
-
         let containsAttribute name =
             info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = name)
 
@@ -111,6 +109,9 @@ type ArgumentParser<'a>() =
                 |> _allowMultipleDefinitions .-> true
             else failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
         else result
+        |> fun result ->
+            getContentParser (result ^. _type) |> ignore // Check if the type is supported. Will throw if not.
+            result
     let rec getCommandInfos results = function
         | [] -> results
         | (currentType, parent)::next ->
