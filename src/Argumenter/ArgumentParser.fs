@@ -33,7 +33,7 @@ type ArgumentParser<'a>() =
                 state ^. _pendingArguments
                 |> Seq.map (fun kvp ->
                     let name = kvp ^. _key
-                    let required = kvp ^. _argument_isRequired
+                    let required = state ^. _isRequired (kvp ^. _value)
                     let isMainArgument = kvp ^. _argument_isMainArgument
                     let contentParser = getContentParser (kvp ^. _argument_type)
                     let fullArgumentParser =
@@ -76,14 +76,19 @@ type ArgumentParser<'a>() =
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
-        let containsAttribute name =
-            info.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = name)
+        let containsAttribute (memberInfo : MemberInfo) name =
+            memberInfo.CustomAttributes |> Seq.exists (fun ca -> ca.AttributeType.Name = name)
 
         let result =
             zero
-            |> _isMainArgument .-> containsAttribute "MainArgumentAttribute"
+            |> _isMainArgument .-> containsAttribute info "MainArgumentAttribute"
             |> _type .-> t
             |> _assigner .-> info.SetValue
+            |> _requiredIf .->
+                match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
+                | null -> None
+                | :? RequiredIfAttribute as x -> Some (x.ArgumentName, x.Value)
+                | _ -> None
 
         if NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable then
             result |> _isAlwaysRequired .-> false
@@ -97,7 +102,7 @@ type ArgumentParser<'a>() =
                     let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                     info.SetValue(o, value)
                 )
-                |> _isRequired .-> false
+                |> _isAlwaysRequired .-> false
             elif genericTypeDefinition = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition() then
                 result
                 |> _type .-> firstGenericArgument
@@ -105,7 +110,7 @@ type ArgumentParser<'a>() =
                     let list = info.GetValue(o) :?> System.Collections.IList
                     list.Add(v) |> ignore
                 )
-                |> _isRequired .-> false
+                |> _isAlwaysRequired .-> false
                 |> _allowMultipleDefinitions .-> true
             else failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
         else result
@@ -154,8 +159,7 @@ type ArgumentParser<'a>() =
             |> List.find (fun (c, _) -> LanguagePrimitives.PhysicalEquality c resultCommand)
             |> snd
         let argumentObject = Activator.CreateInstance argumentType
-        let assigners = (result ^. _assigners).Values |> Seq.collect Seq.rev
-        for assigner in assigners do assigner argumentObject
+        for assigner in result ^. _assigners do assigner argumentObject
         return argumentObject :?> 'a
     }
     member this.Parse() : Result<_, _> =

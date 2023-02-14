@@ -13,7 +13,8 @@ module LensExtensions =
 
 type ArgumentInfo =
     {
-        IsRequired : bool
+        IsAlwaysRequired : bool
+        RequiredIf : (string * obj) option
         Assigner : obj * obj -> unit
         Type : Type
         AllowMultipleDefinitions : bool
@@ -21,15 +22,26 @@ type ArgumentInfo =
     }
     with
     static member Zero = {
-        IsRequired = true
+        IsAlwaysRequired = true
+        RequiredIf = None
         Assigner = ignore
         Type = typeof<string>
         AllowMultipleDefinitions = false
         IsMainArgument = false
     }
 module ArgumentInfo =
-    let inline _isRequired f s =
-        s.IsRequired |> f <&> fun v -> { s with IsRequired = v }
+    let inline _isAlwaysRequired f s =
+        s.IsAlwaysRequired |> f <&> fun v -> {
+            s with
+                IsAlwaysRequired = v
+                RequiredIf = if v then None else s.RequiredIf
+        }
+    let inline _requiredIf f s =
+        s.RequiredIf |> f <&> fun v -> {
+            s with
+                RequiredIf = v
+                IsAlwaysRequired = if v.IsSome then false else s.IsAlwaysRequired
+        }
     let inline _type f s =
         s.Type |> f <&> fun v -> { s with Type = v }
     let inline _allowMultipleDefinitions f s =
@@ -47,7 +59,7 @@ type ParserState =
     {
         CurrentCommand : CommandInfo
         AllCommands : CommandInfo list
-        Assigners : Map<string, (obj -> unit) list>
+        AssignedValues : Map<string, ArgumentInfo * obj list>
     }
     with
     static member Zero = {
@@ -57,7 +69,7 @@ type ParserState =
             Parent = None
             SupportedArguments = Map.empty
         }
-        Assigners = Map.empty
+        AssignedValues = Map.empty
     }
 
 open ArgumentInfo
@@ -67,30 +79,32 @@ module ParserState =
         s.CurrentCommand |> f <&> fun v -> { s with CurrentCommand = v }
     let inline _allCommands f s =
         s.AllCommands |> f <&> fun v -> { s with AllCommands = v }
-    let inline _assigners f s : Const<_, _> = s.Assigners |> f
+    let inline _assigners f s : Const<_, _> =
+        s.AssignedValues.Values
+        |> Seq.collect (fun (info, values) ->
+            values
+            |> Seq.rev
+            |> Seq.map (fun v o -> (info ^. _assigner)(o, v)))
+        |> f
 
     // ArgumentInfo from SupportedArguments KVP
-    let inline _argument_isRequired f : _ -> Const<_, _> =
-        _value << _isRequired <| f
     let inline _argument_allowMultipleDefinitions f : _ -> Const<_, _> =
         _value << _allowMultipleDefinitions <| f
     let inline _argument_type f : _ -> Const<_, _> =
         _value << _type <| f
-    let inline _argument_assigner f : _ -> Const<_, _> =
-        _value << _assigner <| f
     let inline _argument_isMainArgument f : _ -> Const<_, _> =
         _value << _isMainArgument <| f
 
     let inline _assign kvp f s : Identity<_> =
         let name = kvp ^. _key
-        let assigner = kvp ^. _argument_assigner
         f ignore <&> fun v ->
-            let assigner o = assigner(o, v)
-            match s.Assigners.TryFind name with
-            | Some existing -> { s with Assigners = s.Assigners.Add(name, assigner::existing) }
-            | None -> { s with Assigners = s.Assigners.Add(name, [assigner]) }
+            match s.AssignedValues |> Map.tryFind name with
+            | None ->
+                { s with AssignedValues = s.AssignedValues.Add(name, (kvp ^. _value, [v])) }
+            | Some (info, values) ->
+                { s with AssignedValues = s.AssignedValues.Add(name, (info, v::values)) }
     let inline _assigned name f s : Const<_, _> =
-        s ^. (_assigners << Map._item name)
+        s.AssignedValues.TryFind name
         |> Option.isSome
         |> f
     let inline _allSupportedArguments f s : Const<_, _> =
@@ -101,10 +115,28 @@ module ParserState =
             | Some parent -> yield! getSupportedArguments parent
         }
         getSupportedArguments (s ^. _currentCommand) |> f
+    let inline _isRequired argumentInfo f s : Const<_, _> =
+        match argumentInfo ^. _isAlwaysRequired, argumentInfo ^. _requiredIf with
+        | true, _ -> true
+        | false, Some (name, value) ->
+            match s.AssignedValues.TryFind name with
+            | None -> false
+            | Some (_, values) ->
+                if value :? string then
+                    values
+                    |> List.tryFind (fun v ->
+                        String.Equals(
+                            v :?> string,
+                            value :?> string,
+                            StringComparison.OrdinalIgnoreCase))
+                    |> Option.isSome
+                else values |> List.contains value
+        | false, None -> false
+        |> f
     let inline _missingArguments f s : Const<_, _> =
         s ^. _allSupportedArguments
         |> Seq.filter (fun kvp ->
-            let isRequired = kvp ^. _argument_isRequired
+            let isRequired = s ^. _isRequired (kvp ^. _value)
             let name = kvp ^. _key
             let assigned = s ^. _assigned name
             isRequired && not assigned)

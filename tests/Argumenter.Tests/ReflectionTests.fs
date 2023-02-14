@@ -1,5 +1,6 @@
 ﻿module Argumenter.Tests.ReflectionTests
 
+open System
 open System.Linq
 open Expecto
 open Swensen.Unquote
@@ -44,6 +45,19 @@ type MainArgument() =
         | :? MainArgument as other ->
             this.Main = other.Main
         | _ -> false
+type RequiredIfArguments() =
+    member val Predicate = "" with get, set
+
+    [<RequiredIf(nameof Unchecked.defaultof<RequiredIfArguments>.Predicate, "test")>]
+    member val RequiredIf : string option = None with get, set
+
+    override _.GetHashCode() = 0
+    override this.Equals(other : obj) =
+        match other with
+        | :? RequiredIfArguments as other ->
+            this.Predicate = other.Predicate &&
+            this.RequiredIf = other.RequiredIf
+        | _ -> false
 
 [<Tests>]
 let reflectionTests = testList "Reflection" [
@@ -85,5 +99,14 @@ let reflectionTests = testList "Reflection" [
         let expected = MainArgument(Main="value1")
         let actual = ArgumentParser<MainArgument>().Parse(input)
         actual =! Ok expected
+    testCase "Required if arguments are handled correctly if trigger is not set" <| fun _ ->
+        let input = "--predicate test1"
+        let expected = RequiredIfArguments(Predicate="test1", RequiredIf=None)
+        let actual = ArgumentParser<RequiredIfArguments>().Parse(input)
+        actual =! Ok expected
+    testCase "Required if arguments are handled correctly if trigger is set" <| fun _ ->
+        let input = "--predicate test"
+        let actual = ArgumentParser<RequiredIfArguments>().Parse(input)
+        Expect.isError actual "Did not fail when required if argument is set"
 ]
 
