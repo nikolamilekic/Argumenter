@@ -16,6 +16,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.github\workflows\Release.yml = .github\workflows\Release.yml
 		build.fsx = build.fsx
 		build.fsx.lock = build.fsx.lock
+		.config\dotnet-tools.json = .config\dotnet-tools.json
 	EndProjectSection
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Argumenter", "src\Argumenter\Argumenter.fsproj", "{991CF9FA-5B41-4B21-A3A8-B085593467A6}"
