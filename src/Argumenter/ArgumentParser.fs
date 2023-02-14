@@ -85,8 +85,8 @@ type ArgumentParser<'a>() =
             |> _type .-> t
             |> _assigner .-> info.SetValue
 
-        if containsAttribute "NullableAttribute" then
-            result |> _isRequired .-> false
+        if NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable then
+            result |> _isAlwaysRequired .-> false
         elif t.IsGenericType then
             let genericTypeDefinition = t.GetGenericTypeDefinition()
             let firstGenericArgument = t.GetGenericArguments().[0]
