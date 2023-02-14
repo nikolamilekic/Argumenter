@@ -83,7 +83,16 @@ type ArgumentParser<'a>() =
                     info.SetValue(o, value)
                 )
                 |> _isRequired .-> false
-            else failwith "The only currently supported generic arguments are options."
+            elif genericTypeDefinition = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition() then
+                zero
+                |> _parser .-> argument info.Name (getBuiltInParser firstGenericArgument)
+                |> _assigner .-> (fun (o, v) ->
+                    let list = info.GetValue(o) :?> System.Collections.IList
+                    list.Add(v) |> ignore
+                )
+                |> _isRequired .-> false
+                |> _allowMultipleDefinitions .-> true
+            else failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
         else
             zero
             |> _parser .-> argument info.Name (getBuiltInParser t)
@@ -130,7 +139,8 @@ type ArgumentParser<'a>() =
             |> List.find (fun (c, _) -> LanguagePrimitives.PhysicalEquality c resultCommand)
             |> snd
         let argumentObject = Activator.CreateInstance argumentType
-        for assigner in (result ^. _assigners).Values do assigner argumentObject
+        let assigners = (result ^. _assigners).Values |> Seq.collect Seq.rev
+        for assigner in assigners do assigner argumentObject
         return argumentObject :?> 'a
     }
     member this.Parse() : Result<_, _> =

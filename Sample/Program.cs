@@ -20,4 +20,5 @@ public record Arguments
 public record ChildCommandArguments : Arguments
 {
     public string ChildArgument { get; set; } = "";
+    public List<string> Multiple { get; } = new();
 }

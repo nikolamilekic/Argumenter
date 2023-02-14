@@ -1,5 +1,6 @@
 ﻿module Argumenter.Tests.ReflectionTests
 
+open System.Linq
 open Expecto
 open Swensen.Unquote
 open Argumenter
@@ -28,6 +29,15 @@ type ChildArguments() =
             this.ChildArgument1 = other.ChildArgument1
         | _ -> false
 
+type MultipleArguments() =
+    member val MultipleStringList : ResizeArray<string> = ResizeArray() with get, set
+    override _.GetHashCode() = 0
+    override this.Equals(other : obj) =
+        match other with
+        | :? MultipleArguments as other ->
+            this.MultipleStringList.SequenceEqual(other.MultipleStringList)
+        | _ -> false
+
 [<Tests>]
 let reflectionTests = testList "Reflection" [
     testCase "Good case without optional" <| fun _ ->
@@ -53,5 +63,11 @@ let reflectionTests = testList "Reflection" [
         let expected = ChildArguments(RequiredString1="value1", RequiredString2="value2", ChildArgument1="value3")
         let actual = ArgumentParser<RootArguments>().Parse(input)
         actual =! Ok expected
+    testCase "Multiple arguments are parsed correctly" <| fun _ ->
+        let input = "--multiplestringlist value1 --multiplestringlist value2 --multiplestringlist value3"
+        let expected = MultipleArguments(MultipleStringList=ResizeArray(["value1"; "value2"; "value3"]))
+        let actual = ArgumentParser<MultipleArguments>().Parse(input)
+        actual =! Ok expected
+
 ]
 

@@ -14,7 +14,7 @@ type ParserState =
     {
         CurrentCommand : CommandInfo
         AllCommands : CommandInfo list
-        Assigners : Map<string, obj -> unit>
+        Assigners : Map<string, (obj -> unit) list>
     }
     with
     static member Zero = {
@@ -79,7 +79,10 @@ module ParserState =
         let name = kvp ^. _key
         let assigner = kvp ^. _argument_assigner
         f ignore <&> fun v ->
-            { s with Assigners = s.Assigners.Add(name, fun o -> assigner(o, v)) }
+            let assigner o = assigner(o, v)
+            match s.Assigners.TryFind name with
+            | Some existing -> { s with Assigners = s.Assigners.Add(name, assigner::existing) }
+            | None -> { s with Assigners = s.Assigners.Add(name, [assigner]) }
     let inline _assigned name f s : Const<_, _> =
         s ^. (_assigners << Map._item name)
         |> Option.isSome
