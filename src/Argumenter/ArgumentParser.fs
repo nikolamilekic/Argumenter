@@ -15,6 +15,7 @@ open ParserState
 
 type ArgumentParser<'a>() =
     let callingAssembly = Assembly.GetCallingAssembly()
+    let mutable executableName = callingAssembly.GetName().Name + ".exe"
     let relevantTypes =
         callingAssembly.GetTypes()
         |> Seq.filter(fun t -> t.IsAssignableTo typeof<'a>)
@@ -30,7 +31,6 @@ type ArgumentParser<'a>() =
     let multiWordString =
         skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
     let stringArgument = (multiWordString <|> singleWordString) <?> "string"
-
     let contentParsers = Dictionary<Type, Parser<_, _>>(
         [
             typeof<string>, stringArgument |>> box
@@ -162,43 +162,43 @@ type ArgumentParser<'a>() =
         |> fun result ->
             getContentParser (result ^. _type) |> ignore // Check if the type is supported. Will throw if not.
             result
-    let rec getCommandInfos results = function
-        | [] -> results
-        | (currentType, parent)::next ->
-            let argumentInfos =
-                getProperties currentType
-                |> Array.map (fun p -> p.Name, getArgumentInfo p)
-                |> Map.ofSeq
-            let currentCommandInfo = {
-                Command =
-                    if parent |> Option.isNone then ""
-                    elif currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
-                    then currentType.Name.Substring(0, currentType.Name.Length - 9)
-                    else currentType.Name
-                SupportedArguments = argumentInfos
-                Parent = parent
-                Description =
-                    match currentType.GetCustomAttribute(typeof<DescriptionAttribute>) with
-                    | :? DescriptionAttribute as x -> x.Description
-                    | _ -> ""
-            }
-            let children =
-                relevantTypes
-                |> Seq.filter (fun t ->
-                    t.BaseType = currentType &&
-                    isNull (t.GetConstructor([||])) = false)
-                |> Seq.map (fun t -> t, Some currentCommandInfo)
-                |> Seq.toList
-            getCommandInfos ((currentCommandInfo, currentType)::results) (children @ next)
-    let commandTypes = getCommandInfos [] [(typeof<'a>, None)]
-    let rootCommand = commandTypes |> List.find (fun (_, t) -> t = typeof<'a>) |> fst
-    let allCommands = commandTypes |> List.map fst
-    let mutable initialState =
+
+    member private _.GetCommandInfos() =
+        let rec inner results = function
+            | [] -> results
+            | (currentType, parent)::next ->
+                let argumentInfos =
+                    getProperties currentType
+                    |> Array.map (fun p -> p.Name, getArgumentInfo p)
+                    |> Map.ofSeq
+                let currentCommandInfo = {
+                    Command =
+                        if parent |> Option.isNone then ""
+                        elif currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
+                        then currentType.Name.Substring(0, currentType.Name.Length - 9)
+                        else currentType.Name
+                    SupportedArguments = argumentInfos
+                    Parent = parent
+                    Description =
+                        match currentType.GetCustomAttribute(typeof<DescriptionAttribute>) with
+                        | :? DescriptionAttribute as x -> x.Description
+                        | _ -> ""
+                }
+                let children =
+                    relevantTypes
+                    |> Seq.filter (fun t ->
+                        t.BaseType = currentType &&
+                        isNull (t.GetConstructor([||])) = false)
+                    |> Seq.map (fun t -> t, Some currentCommandInfo)
+                    |> Seq.toList
+                inner ((currentCommandInfo, currentType)::results) (children @ next)
+        inner [] [(typeof<'a>, None)]
+    member private _.MakeState(commandInfos) =
+        let rootCommand = commandInfos |> List.find (fun (_, t) -> t = typeof<'a>) |> fst
+        let allCommands = commandInfos |> List.map fst
         zero
-        |> _executableName .-> (callingAssembly.GetName().Name + ".exe")
         |> _currentCommand .-> rootCommand
         |> _allCommands .-> allCommands
-
     member _.Help(state) =
         let sb = StringBuilder()
 
@@ -207,7 +207,7 @@ type ArgumentParser<'a>() =
             " ",
             commandPath |> Seq.map (fun c -> c.Command.ToLower()) |> Seq.filter (fun s -> s <> ""))
         let currentCommand = state ^. _currentCommand
-        sb.Append($"{(state ^. _executableName).ToLower()}") |> ignore
+        sb.Append($"{executableName.ToLower()}") |> ignore
         if commandPathString <> "" then
             sb.Append($" {commandPathString}") |> ignore
 
@@ -273,14 +273,16 @@ type ArgumentParser<'a>() =
 
         sb.ToString()
 
-    member this.Help() = this.Help(initialState)
+    member this.Help() = this.Help(this.MakeState(this.GetCommandInfos()))
     member this.WithExecutableName(name : string) =
-        initialState <- initialState |> _executableName .-> name
+        executableName <- name
         this
     member this.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
         contentParsers[typeof<'arg>] <- (parser |>> box)
         this
     member this.Parse(args : string) : Result<_, _> = monad.strict {
+        let commandInfos = this.GetCommandInfos()
+        let initialState = this.MakeState(commandInfos)
         let! result =
             match runParserOnString parser initialState "" args with
             | ParserResult.Success (_, state, _) -> Ok state
@@ -295,7 +297,7 @@ type ArgumentParser<'a>() =
             | ParserResult.Failure (message, _, _) -> Error message
         let resultCommand = result ^. _currentCommand
         let argumentType =
-            commandTypes
+            commandInfos
             |> List.find (fun (c, _) -> LanguagePrimitives.PhysicalEquality c resultCommand)
             |> snd
         let argumentObject = Activator.CreateInstance argumentType

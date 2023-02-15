@@ -60,7 +60,6 @@ type ParserState =
         CurrentCommand : CommandInfo
         AllCommands : CommandInfo list
         AssignedValues : Map<string, ArgumentInfo * obj list>
-        ExecutableName : string
         Help : bool
     }
     with
@@ -73,7 +72,6 @@ type ParserState =
             Description = ""
         }
         AssignedValues = Map.empty
-        ExecutableName = ""
         Help = false
     }
 
@@ -84,8 +82,6 @@ module ParserState =
         s.CurrentCommand |> f <&> fun v -> { s with CurrentCommand = v }
     let inline _allCommands f s =
         s.AllCommands |> f <&> fun v -> { s with AllCommands = v }
-    let inline _executableName f s =
-        s.ExecutableName |> f <&> fun v -> { s with ExecutableName = v }
     let inline _assigners f s : Const<_, _> =
         s.AssignedValues.Values
         |> Seq.collect (fun (info, values) ->
