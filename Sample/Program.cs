@@ -22,8 +22,8 @@ public record Arguments
 
     [Description("Description of argument called required1")]
     public string Required1 { get; set; } = "";
-    public string Required2 { get; set; } = "";
-    public string? Optional1 { get; set; }
+    public int Required2 { get; set; } = 0;
+    public double? Optional1 { get; set; }
 
     [RequiredIf(nameof(Required1), "trigger")]
     public string? RequiredIf { get; set; }

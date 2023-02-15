@@ -1,6 +1,7 @@
 ﻿namespace Argumenter
 
 open System
+open System.Collections.Generic
 open System.ComponentModel
 open System.ComponentModel.DataAnnotations
 open System.Reflection
@@ -23,10 +24,23 @@ type ArgumentParser<'a>() =
     let Ok = Result.Ok
     let Error = Result.Error
 
+    let contentParsers = Dictionary<Type, Parser<_, _>>(
+        [
+            typeof<string>, stringArgument |>> box
+            typeof<double>, pfloat |>> box
+            typeof<int8>, pint8 |>> box
+            typeof<int16>, pint16 |>> box
+            typeof<int32>, pint32 |>> box
+            typeof<int64>, pint64 |>> box
+            typeof<uint8>, puint8 |>> box
+            typeof<uint16>, puint16 |>> box
+            typeof<uint32>, puint32 |>> box
+            typeof<uint64>, puint64 |>> box
+        ] |> Seq.map KeyValuePair.Create)
     let getContentParser (t : Type) =
-        if t = typeof<string>
-        then stringArgument |>> box
-        else failwith $"{t.Name} is not a supported argument type."
+        match contentParsers.TryGetValue t with
+        | true, x -> x
+        | _ -> failwith $"{t.Name} is not a supported argument type."
 
     let parser : Parser<unit, ParserState> =
         let eof = eof <?> ""
@@ -83,8 +97,9 @@ type ArgumentParser<'a>() =
         let t = info.PropertyType
 
         let isNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
+        let isNullableValue = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Nullable<_>>.GetGenericTypeDefinition()
         let isOption = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Option<_>>.GetGenericTypeDefinition()
-        let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<System.Collections.Generic.List<_>>.GetGenericTypeDefinition()
+        let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<List<_>>.GetGenericTypeDefinition()
         let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
         let mainArgumentAttributeSet = isNull (info.GetCustomAttribute(typeof<MainArgumentAttribute>)) = false
 
@@ -98,7 +113,7 @@ type ArgumentParser<'a>() =
                 match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
                 | :? RequiredIfAttribute as x -> RequiredIf (x.ArgumentName, x.Value)
                 | _ ->
-                    if isNullable || isOption || isGenericList
+                    if isNullable || isNullableValue || isOption || isGenericList
                     then Optional
                     else AlwaysRequired
             |> _description .->
@@ -106,7 +121,7 @@ type ArgumentParser<'a>() =
                 | :? DescriptionAttribute as x -> x.Description
                 | _ -> ""
 
-        if isOption then
+        if isOption || isNullableValue then
             let firstGenericArgument = t.GetGenericArguments().[0]
             result
             |> _type .-> firstGenericArgument
@@ -114,6 +129,7 @@ type ArgumentParser<'a>() =
                 let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                 info.SetValue(o, value)
             )
+        elif isNullable then result
         elif isGenericList then
             if isNullable || isOption then failwith "Generic lists cannot be nullable or options." else
 
@@ -244,6 +260,8 @@ type ArgumentParser<'a>() =
     member this.Help() = this.Help(initialState)
     member _.WithExecutableName(name : string) =
         initialState <- initialState |> _executableName .-> name
+    member _.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
+        contentParsers[typeof<'arg>] <- (parser |>> box)
     member this.Parse(args : string) : Result<_, _> = monad.strict {
         let! result =
             match runParserOnString parser initialState "" args with
