@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Argumenter;
 
@@ -13,11 +14,13 @@ else
     Console.WriteLine(result.ErrorValue);
 }
 
-
+[Description("Root description")]
 public record Arguments
 {
     [MainArgument]
     public string? MainArgument { get; set; }
+
+    [Description("Description of argument called required1")]
     public string Required1 { get; set; } = "";
     public string Required2 { get; set; } = "";
     public string? Optional1 { get; set; }
@@ -26,6 +29,7 @@ public record Arguments
     public string? RequiredIf { get; set; }
 }
 
+[Description("Child command description")]
 public record ChildCommandArguments : Arguments
 {
     public string ChildArgument { get; set; } = "";

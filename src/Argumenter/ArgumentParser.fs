@@ -1,8 +1,10 @@
 ﻿namespace Argumenter
 
 open System
+open System.ComponentModel
 open System.ComponentModel.DataAnnotations
 open System.Reflection
+open System.Text
 open FSharpPlus
 open FSharpPlus.Lens
 open FParsec
@@ -12,10 +14,9 @@ open ArgumentInfo
 open ParserState
 
 type ArgumentParser<'a>() =
+    let callingAssembly = Assembly.GetCallingAssembly()
     let relevantTypes =
-        Assembly
-            .GetCallingAssembly()
-            .GetTypes()
+        callingAssembly.GetTypes()
         |> Seq.filter(fun t -> t.IsAssignableTo typeof<'a>)
         |> Seq.toList
 
@@ -23,12 +24,13 @@ type ArgumentParser<'a>() =
     let Error = Result.Error
 
     let getContentParser (t : Type) =
-        if t = typeof<string> then
-            stringArgument |>> box
-        else
-            failwith $"{t.Name} is not a supported argument type."
+        if t = typeof<string>
+        then stringArgument |>> box
+        else failwith $"{t.Name} is not a supported argument type."
 
     let parser : Parser<unit, ParserState> =
+        let eof = eof <?> ""
+        let printHelp = updateUserState (_help .-> true) >>. fail ""
         let rec pendingArgumentsParser () = getUserState >>= fun state ->
             let argumentParsers =
                 state ^. _pendingArguments
@@ -57,9 +59,12 @@ type ArgumentParser<'a>() =
                     <?> $"{command.Command.ToLower()}")
             argumentParsers
             |> Seq.append commandParsers
+            |> Seq.append [|skipStringCI "--help" <?> "--help" >>. printHelp|]
             |> choice
-            >>= fun () -> (eof <?> "") <|> pendingArgumentsParser ()
-        pendingArgumentsParser () >>. getUserState >>= fun state ->
+            >>= fun () -> eof <|> pendingArgumentsParser ()
+
+        eof >>. printHelp
+        <|> pendingArgumentsParser () >>. getUserState >>= fun state ->
             match state ^. _missingArguments |> Seq.toList with
             | [] -> preturn ()
             | missing ->
@@ -88,7 +93,7 @@ type ArgumentParser<'a>() =
             |> _isMainArgument .-> mainArgumentAttributeSet
             |> _type .-> t
             |> _assigner .-> info.SetValue
-            |> _requiredment .->
+            |> _requirement .->
                 if requiredAttributeSet then AlwaysRequired else
                 match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
                 | :? RequiredIfAttribute as x -> RequiredIf (x.ArgumentName, x.Value)
@@ -96,6 +101,10 @@ type ArgumentParser<'a>() =
                     if isNullable || isOption || isGenericList
                     then Optional
                     else AlwaysRequired
+            |> _description .->
+                match info.GetCustomAttribute(typeof<DescriptionAttribute>) with
+                | :? DescriptionAttribute as x -> x.Description
+                | _ -> ""
 
         if isOption then
             let firstGenericArgument = t.GetGenericArguments().[0]
@@ -130,11 +139,16 @@ type ArgumentParser<'a>() =
                 |> Map.ofSeq
             let currentCommandInfo = {
                 Command =
-                    if currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
+                    if parent |> Option.isNone then ""
+                    elif currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
                     then currentType.Name.Substring(0, currentType.Name.Length - 9)
                     else currentType.Name
                 SupportedArguments = argumentInfos
                 Parent = parent
+                Description =
+                    match currentType.GetCustomAttribute(typeof<DescriptionAttribute>) with
+                    | :? DescriptionAttribute as x -> x.Description
+                    | _ -> ""
             }
             let children =
                 relevantTypes
@@ -147,15 +161,101 @@ type ArgumentParser<'a>() =
     let commandTypes = getCommandInfos [] [(typeof<'a>, None)]
     let rootCommand = commandTypes |> List.find (fun (_, t) -> t = typeof<'a>) |> fst
     let allCommands = commandTypes |> List.map fst
+    let mutable initialState =
+        zero
+        |> _executableName .-> (callingAssembly.GetName().Name + ".exe")
+        |> _currentCommand .-> rootCommand
+        |> _allCommands .-> allCommands
 
-    member _.Parse(args : string) : Result<_, _> = monad.strict {
-        let parserState =
-            zero
-            |> _currentCommand .-> rootCommand
-            |> _allCommands .-> allCommands
+    member _.Help(state) =
+        let sb = StringBuilder()
+
+        let commandPath = state ^. _commandPath
+        let commandPathString = String.Join(
+            " ",
+            commandPath |> Seq.map (fun c -> c.Command.ToLower()) |> Seq.filter (fun s -> s <> ""))
+        let currentCommand = state ^. _currentCommand
+        sb.Append($"{(state ^. _executableName).ToLower()}") |> ignore
+        if commandPathString <> "" then
+            sb.Append($" {commandPathString}") |> ignore
+
+        let mainArgument =
+            currentCommand.SupportedArguments
+            |> Seq.tryFind (view _argument_isMainArgument)
+        match mainArgument with
+        | Some kvp ->
+            let name = kvp ^. _key
+            let info = kvp ^. _value
+            if state ^. _isRequired info
+            then sb.AppendLine($" <{name.ToLower()}>\n") |> ignore
+            else sb.AppendLine($" [<{name.ToLower()}>]\n") |> ignore
+        | None -> sb.AppendLine("\n") |> ignore
+
+        if currentCommand.Description <> "" then
+            sb.AppendLine(currentCommand.Description).AppendLine("") |> ignore
+
+        let subCommands = state ^. _pendingCommands
+        let arguments = state ^. _allSupportedArguments |> Seq.filter (view _argument_isMainArgument >> not)
+        let maxLength =
+            subCommands |> Seq.map (fun c -> c.Command.Length)
+            |> Seq.append (arguments |> Seq.map (fun kvp -> kvp.Key.Length))
+            |> Seq.max
+
+        if subCommands |> Seq.isEmpty = false then
+            sb.AppendLine("SUBCOMMANDS:\n") |> ignore
+            for subCommand in subCommands do
+                sb.Append($"  {subCommand.Command.ToLower().PadRight(maxLength + 2)}") |> ignore
+                if subCommand.Description <> ""
+                then sb.AppendLine($"    {subCommand.Description}") |> ignore
+                else sb.AppendLine("") |> ignore
+            sb.AppendLine("") |> ignore
+
+        let overridesHelp =
+            arguments
+            |> Seq.exists (fun kvp -> String.Equals(kvp ^. _key, "help", StringComparison.InvariantCultureIgnoreCase))
+        let requiredArguments =
+            arguments
+            |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value))
+
+        let printArgument kvp =
+            let name : string = kvp ^. _key
+            sb.Append($"  --{name.ToLower().PadRight(maxLength)}") |> ignore
+            let description = kvp ^. _argument_description
+            if description <> ""
+            then sb.AppendLine($"    {description}") |> ignore
+            else sb.AppendLine("") |> ignore
+
+        if requiredArguments |> Seq.isEmpty = false then
+            sb.AppendLine("REQUIRED ARGUMENTS:\n") |> ignore
+            for kvp in requiredArguments do printArgument kvp
+            sb.AppendLine("") |> ignore
+
+        let optionalArguments =
+            arguments
+            |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value) |> not)
+        sb.AppendLine("OPTIONAL ARGUMENTS:\n") |> ignore
+        for kvp in optionalArguments do printArgument kvp
+        if not overridesHelp then
+            let helpArgument = "help".PadRight(maxLength)
+            sb.AppendLine($"  --{helpArgument}    Prints a list of arguments and commands") |> ignore
+
+        sb.ToString()
+
+    member this.Help() = this.Help(initialState)
+    member _.WithExecutableName(name : string) =
+        initialState <- initialState |> _executableName .-> name
+    member this.Parse(args : string) : Result<_, _> = monad.strict {
         let! result =
-            match runParserOnString parser parserState "" args with
+            match runParserOnString parser initialState "" args with
             | ParserResult.Success (_, state, _) -> Ok state
+            | ParserResult.Failure (_, _, state) when state ^. _help ->
+                Error (this.Help(state))
+            | ParserResult.Failure (message, _, _) when message.StartsWith "Error in" ->
+                let withoutFirstLine =
+                    message.Split(Environment.NewLine)
+                    |> Seq.skip 1
+                    |> String.concat(Environment.NewLine)
+                Error withoutFirstLine
             | ParserResult.Failure (message, _, _) -> Error message
         let resultCommand = result ^. _currentCommand
         let argumentType =

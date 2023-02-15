@@ -25,6 +25,7 @@ type ArgumentInfo =
         Type : Type
         AllowMultipleDefinitions : bool
         IsMainArgument : bool
+        Description : string
     }
     with
     static member Zero = {
@@ -33,9 +34,10 @@ type ArgumentInfo =
         Type = typeof<string>
         AllowMultipleDefinitions = false
         IsMainArgument = false
+        Description = ""
     }
 module ArgumentInfo =
-    let inline _requiredment f s =
+    let inline _requirement f s =
         s.Requirement |> f <&> fun v -> { s with Requirement = v }
     let inline _type f s =
         s.Type |> f <&> fun v -> { s with Type = v }
@@ -44,17 +46,22 @@ module ArgumentInfo =
     let inline _assigner f s = s.Assigner |> f <&> fun v -> { s with Assigner = v }
     let inline _isMainArgument f s =
         s.IsMainArgument |> f <&> fun v -> { s with IsMainArgument = v }
+    let inline _description f s =
+        s.Description |> f <&> fun v -> { s with Description = v }
 type CommandInfo =
     {
         Command : string
         Parent : CommandInfo option
         SupportedArguments : Map<string, ArgumentInfo>
+        Description : string
     }
 type ParserState =
     {
         CurrentCommand : CommandInfo
         AllCommands : CommandInfo list
         AssignedValues : Map<string, ArgumentInfo * obj list>
+        ExecutableName : string
+        Help : bool
     }
     with
     static member Zero = {
@@ -63,8 +70,11 @@ type ParserState =
             Command = ""
             Parent = None
             SupportedArguments = Map.empty
+            Description = ""
         }
         AssignedValues = Map.empty
+        ExecutableName = ""
+        Help = false
     }
 
 open ArgumentInfo
@@ -74,6 +84,8 @@ module ParserState =
         s.CurrentCommand |> f <&> fun v -> { s with CurrentCommand = v }
     let inline _allCommands f s =
         s.AllCommands |> f <&> fun v -> { s with AllCommands = v }
+    let inline _executableName f s =
+        s.ExecutableName |> f <&> fun v -> { s with ExecutableName = v }
     let inline _assigners f s : Const<_, _> =
         s.AssignedValues.Values
         |> Seq.collect (fun (info, values) ->
@@ -81,6 +93,8 @@ module ParserState =
             |> Seq.rev
             |> Seq.map (fun v o -> (info ^. _assigner)(o, v)))
         |> f
+    let inline _help f s =
+        s.Help |> f <&> fun v -> { s with Help = v }
 
     // ArgumentInfo from SupportedArguments KVP
     let inline _argument_allowMultipleDefinitions f : _ -> Const<_, _> =
@@ -89,6 +103,8 @@ module ParserState =
         _value << _type <| f
     let inline _argument_isMainArgument f : _ -> Const<_, _> =
         _value << _isMainArgument <| f
+    let inline _argument_description f : _ -> Const<_, _> =
+        _value << _description <| f
 
     let inline _assign kvp f s : Identity<_> =
         let name = kvp ^. _key
@@ -102,16 +118,21 @@ module ParserState =
         s.AssignedValues.TryFind name
         |> Option.isSome
         |> f
-    let inline _allSupportedArguments f s : Const<_, _> =
-        let rec getSupportedArguments command = seq {
-            yield! command.SupportedArguments
+    let inline _commandPath f s : Const<_, _> =
+        let rec parents command = seq {
+            yield command
             match command.Parent with
             | None -> ()
-            | Some parent -> yield! getSupportedArguments parent
+            | Some parent -> yield! parents parent
         }
-        getSupportedArguments (s ^. _currentCommand) |> f
+        parents (s ^. _currentCommand) |> Seq.rev |> f
+    let inline _allSupportedArguments f s : Const<_, _> =
+        s ^. _commandPath
+        |> Seq.rev
+        |> Seq.collect (fun c -> c.SupportedArguments)
+        |> f
     let inline _isRequired argumentInfo f s : Const<_, _> =
-        match argumentInfo ^. _requiredment with
+        match argumentInfo ^. _requirement with
         | AlwaysRequired -> true
         | Optional -> false
         | RequiredIf (name, value) ->
