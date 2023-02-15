@@ -24,6 +24,7 @@ public record Arguments
     public string Required1 { get; set; } = "";
     public int Required2 { get; set; } = 0;
     public double? Optional1 { get; set; }
+    public bool Flag { get; set; } = false;
 
     [RequiredIf(nameof(Required1), "trigger")]
     public string? RequiredIf { get; set; }

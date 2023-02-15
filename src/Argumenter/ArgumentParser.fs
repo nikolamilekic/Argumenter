@@ -43,6 +43,7 @@ type ArgumentParser<'a>() =
             typeof<uint16>, puint16 |>> box
             typeof<uint32>, puint32 |>> box
             typeof<uint64>, puint64 |>> box
+            typeof<bool>, fail "Bools are handled as flags. This should never be triggered"
         ] |> Seq.map KeyValuePair.Create)
     let getContentParser (t : Type) =
         match contentParsers.TryGetValue t with
@@ -56,20 +57,27 @@ type ArgumentParser<'a>() =
             let argumentParsers =
                 state ^. _pendingArguments
                 |> Seq.map (fun kvp ->
+                    let argumentType = kvp ^. _argument_type
                     let name = kvp ^. _key
-                    let required = state ^. _isRequired (kvp ^. _value)
-                    let isMainArgument = kvp ^. _argument_isMainArgument
-                    let contentParser = getContentParser (kvp ^. _argument_type)
-                    let fullArgumentParser =
-                        skipStringCI $"--{name}" >>. spaces1 >>. contentParser
-                    let finalParser =
-                        if isMainArgument then contentParser <|> fullArgumentParser
-                        else fullArgumentParser
+                    if argumentType = typeof<bool> then
+                        let parser = skipStringCI $"--{name}"
+                        spaces >>. parser .>> spaces
+                        >>= (fun () -> updateUserState (_assign kvp .-> true))
+                        <?> $"[--{name.ToLower()}]"
+                    else
+                        let required = state ^. _isRequired (kvp ^. _value)
+                        let isMainArgument = kvp ^. _argument_isMainArgument
+                        let contentParser = getContentParser argumentType
+                        let fullArgumentParser =
+                            skipStringCI $"--{name}" >>. spaces1 >>. contentParser
+                        let finalParser =
+                            if isMainArgument then contentParser <|> fullArgumentParser
+                            else fullArgumentParser
 
-                    spaces >>. finalParser .>> spaces
-                    >>= (fun value ->
-                        updateUserState (_assign kvp .-> value))
-                    <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
+                        spaces >>. finalParser .>> spaces
+                        >>= (fun value ->
+                            updateUserState (_assign kvp .-> value))
+                        <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
             let commandParsers =
                 state ^. _pendingCommands
                 |> Seq.map (fun command ->
@@ -116,7 +124,8 @@ type ArgumentParser<'a>() =
             |> _type .-> t
             |> _assigner .-> info.SetValue
             |> _requirement .->
-                if requiredAttributeSet then AlwaysRequired else
+                if t = typeof<bool> then Optional
+                elif requiredAttributeSet then AlwaysRequired else
                 match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
                 | :? RequiredIfAttribute as x -> RequiredIf (x.ArgumentName, x.Value)
                 | _ ->
