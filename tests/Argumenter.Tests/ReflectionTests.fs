@@ -1,6 +1,5 @@
 ﻿module Argumenter.Tests.ReflectionTests
 
-open System
 open System.Linq
 open Expecto
 open Swensen.Unquote

@@ -5,7 +5,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="paket.references" />
-    <Compile Include="ParserTests.fs" />
     <Compile Include="ReflectionTests.fs" />
   </ItemGroup>
   <ItemGroup>

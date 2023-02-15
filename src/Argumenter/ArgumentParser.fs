@@ -10,7 +10,6 @@ open FSharpPlus
 open FSharpPlus.Lens
 open FParsec
 
-open Parsers
 open ArgumentInfo
 open ParserState
 
@@ -23,6 +22,14 @@ type ArgumentParser<'a>() =
 
     let Ok = Result.Ok
     let Error = Result.Error
+
+    let singleWordString =
+        notFollowedByString "--"
+        >>. notFollowedByString "\""
+        >>. many1CharsTill anyChar (spaces1 <|> eof)
+    let multiWordString =
+        skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
+    let stringArgument = (multiWordString <|> singleWordString) <?> "string"
 
     let contentParsers = Dictionary<Type, Parser<_, _>>(
         [
