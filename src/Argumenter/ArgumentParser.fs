@@ -265,10 +265,12 @@ type ArgumentParser<'a>() =
         sb.ToString()
 
     member this.Help() = this.Help(initialState)
-    member _.WithExecutableName(name : string) =
+    member this.WithExecutableName(name : string) =
         initialState <- initialState |> _executableName .-> name
-    member _.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
+        this
+    member this.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
         contentParsers[typeof<'arg>] <- (parser |>> box)
+        this
     member this.Parse(args : string) : Result<_, _> = monad.strict {
         let! result =
             match runParserOnString parser initialState "" args with
