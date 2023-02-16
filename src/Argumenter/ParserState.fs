@@ -131,19 +131,24 @@ module ParserState =
         match argumentInfo ^. _requirement with
         | AlwaysRequired -> true
         | Optional -> false
-        | RequiredIf (name, value) ->
+        | RequiredIf (name, value) when (value :? bool) ->
+            //Flags cannot be set multiple times
+            value = s.AssignedValues.ContainsKey name
+        | RequiredIf (name, value) when (value :? string) ->
             match s.AssignedValues.TryFind name with
             | None -> false
             | Some (_, values) ->
-                if value :? string then
-                    values
-                    |> List.tryFind (fun v ->
-                        String.Equals(
-                            v :?> string,
-                            value :?> string,
-                            StringComparison.OrdinalIgnoreCase))
-                    |> Option.isSome
-                else values |> List.contains value
+                values
+                |> List.tryFind (fun v ->
+                    String.Equals(
+                        v :?> string,
+                        value :?> string,
+                        StringComparison.OrdinalIgnoreCase))
+                |> Option.isSome
+        | RequiredIf (name, value) ->
+            match s.AssignedValues.TryFind name with
+            | None -> false
+            | Some (_, values) -> values |> List.contains value
         |> f
     let inline _missingArguments f s : Const<_, _> =
         s ^. _allSupportedArguments

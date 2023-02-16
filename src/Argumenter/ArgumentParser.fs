@@ -149,6 +149,9 @@ type ArgumentParser<'a>() =
         elif isGenericList then
             if isNullable || isOption then failwith "Generic lists cannot be nullable or options." else
 
+            let firstGenericArgument = t.GetGenericArguments().[0]
+            if firstGenericArgument = typeof<bool> then failwith "Flags cannot be defined multiple times, List<bool> is therefore not supported." else
+
             result
             |> _type .-> t.GetGenericArguments().[0]
             |> _assigner .-> (fun (o, v) ->
