@@ -236,18 +236,50 @@ type ArgumentParser<'a>() =
 
         let subCommands = state ^. _pendingCommands
         let arguments = state ^. _allSupportedArguments |> Seq.filter (view _argument_isMainArgument >> not)
+
         let maxLength =
             subCommands |> Seq.map (fun c -> c.Command.Length)
-            |> Seq.append (arguments |> Seq.map (fun kvp -> kvp.Key.Length))
+            |> Seq.append (arguments |> Seq.map (fun kvp -> kvp.Key.Length + 2)) //Two extra spaces for --
             |> Seq.max
+
+        let titlePrefixLength = 2
+        let titleColumnSeparatorLength = 2
+
+        let windowWidth = max (try Console.WindowWidth with _ -> 80) 80
+        let titleColumnWidth = maxLength + titlePrefixLength + titleColumnSeparatorLength
+        let descriptionColumnWidth = windowWidth - titleColumnWidth
+
+        let printWithWordWrap (title : string) (description : string) =
+            let fullTitle =
+                title
+                    .PadLeft(title.Length + titlePrefixLength)
+                    .PadRight(titleColumnWidth)
+            sb.Append(fullTitle) |> ignore
+
+            if description = ""
+            then sb.AppendLine("") |> ignore
+            elif descriptionColumnWidth < 40
+            then sb.AppendLine("").AppendLine(description.PadLeft(description.Length + titleColumnSeparatorLength))|> ignore
+            else
+
+            let mutable remainingWidth = descriptionColumnWidth
+            for word in description.Split([|' '|]) do
+                if word.Length + 1 > remainingWidth then
+                    sb
+                        .AppendLine("")
+                        .Append(word.PadLeft(titleColumnWidth + word.Length))
+                        .Append(" ")
+                    |> ignore
+                    remainingWidth <- descriptionColumnWidth - word.Length - 1
+                else
+                    sb.Append(word).Append(" ") |> ignore
+                    remainingWidth <- remainingWidth - word.Length - 1
+            sb.AppendLine("") |> ignore
 
         if subCommands |> Seq.isEmpty = false then
             sb.AppendLine("SUBCOMMANDS:\n") |> ignore
             for subCommand in subCommands do
-                sb.Append($"  {subCommand.Command.ToLower().PadRight(maxLength + 2)}") |> ignore
-                if subCommand.Description <> ""
-                then sb.AppendLine($"    {subCommand.Description}") |> ignore
-                else sb.AppendLine("") |> ignore
+                printWithWordWrap $"{subCommand.Command.ToLower()}" subCommand.Description
             sb.AppendLine("") |> ignore
 
         let overridesHelp =
@@ -257,27 +289,20 @@ type ArgumentParser<'a>() =
             arguments
             |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value))
 
-        let printArgument kvp =
-            let name : string = kvp ^. _key
-            sb.Append($"  --{name.ToLower().PadRight(maxLength)}") |> ignore
-            let description = kvp ^. _argument_description
-            if description <> ""
-            then sb.AppendLine($"    {description}") |> ignore
-            else sb.AppendLine("") |> ignore
-
         if requiredArguments |> Seq.isEmpty = false then
             sb.AppendLine("REQUIRED ARGUMENTS:\n") |> ignore
-            for kvp in requiredArguments do printArgument kvp
+            for kvp in requiredArguments do
+                printWithWordWrap $"--{(kvp ^. _key).ToLower()}" (kvp ^. _argument_description)
             sb.AppendLine("") |> ignore
 
         let optionalArguments =
             arguments
             |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value) |> not)
         sb.AppendLine("OPTIONAL ARGUMENTS:\n") |> ignore
-        for kvp in optionalArguments do printArgument kvp
+        for kvp in optionalArguments do
+            printWithWordWrap $"--{(kvp ^. _key).ToLower()}" (kvp ^. _argument_description)
         if not overridesHelp then
-            let helpArgument = "help".PadRight(maxLength)
-            sb.AppendLine($"  --{helpArgument}    Prints a list of arguments and commands") |> ignore
+            printWithWordWrap "--help" "Prints a list of arguments and commands"
 
         sb.ToString()
 
