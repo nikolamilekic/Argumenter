@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
 using Argumenter;
 
 var result = new ArgumentParser<Arguments>().Parse();
@@ -26,7 +25,7 @@ public record Arguments
     public double? Optional1 { get; set; }
     public bool Flag { get; set; } = false;
 
-    [RequiredIf(nameof(Required1), "trigger")]
+    [ArgumentRequired(requiredIf:nameof(Required1), "trigger")]
     public string? RequiredIf { get; set; }
 }
 
@@ -35,7 +34,7 @@ public record ChildCommandArguments : Arguments
 {
     public string ChildArgument { get; set; } = "";
 
-    [Required]
+    [ArgumentRequired]
     public List<string> Multiple { get; } = new();
 
     public override string ToString()

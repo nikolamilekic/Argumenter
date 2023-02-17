@@ -111,8 +111,8 @@ type ArgumentParser<'a>() =
     let getArgumentInfo (info : PropertyInfo) =
         let t = info.PropertyType
 
-        let isNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
-        let isNullableValue = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Nullable<_>>.GetGenericTypeDefinition()
+        let isCSNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
+        let isSystemNullable = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Nullable<_>>.GetGenericTypeDefinition()
         let isOption = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Option<_>>.GetGenericTypeDefinition()
         let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<List<_>>.GetGenericTypeDefinition()
         let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
@@ -123,13 +123,15 @@ type ArgumentParser<'a>() =
             |> _isMainArgument .-> mainArgumentAttributeSet
             |> _type .-> t
             |> _assigner .-> info.SetValue
-            |> _requirement .->
-                if t = typeof<bool> then Optional
-                elif requiredAttributeSet then AlwaysRequired else
-                match info.GetCustomAttribute(typeof<RequiredIfAttribute>) with
-                | :? RequiredIfAttribute as x -> RequiredIf (x.ArgumentName, x.Value)
+            |> _requirementType .->
+                if t = typeof<bool> then Optional else // Flags are always optional
+                match info.GetCustomAttribute(typeof<ArgumentRequiredAttribute>) with
+                | :? ArgumentRequiredAttribute as x ->
+                    if requiredAttributeSet then failwith "Required and ArgumentRequired attributes cannot be set at the same time." else
+                    x.RequirementType
                 | _ ->
-                    if isNullable || isNullableValue || isOption || isGenericList
+                    if requiredAttributeSet then AlwaysRequired
+                    elif isCSNullable || isSystemNullable || isOption || isGenericList
                     then Optional
                     else AlwaysRequired
             |> _description .->
@@ -137,7 +139,10 @@ type ArgumentParser<'a>() =
                 | :? DescriptionAttribute as x -> x.Description
                 | _ -> ""
 
-        if isOption || isNullableValue then
+        if isOption || isSystemNullable then
+            // Nullable (or optional) flags are nonsensical
+            if t = typeof<bool> then failwith "Flags cannot be nullable or options." else
+
             let firstGenericArgument = t.GetGenericArguments().[0]
             result
             |> _type .-> firstGenericArgument
@@ -145,9 +150,9 @@ type ArgumentParser<'a>() =
                 let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
                 info.SetValue(o, value)
             )
-        elif isNullable then result
+        elif isCSNullable then result
         elif isGenericList then
-            if isNullable || isOption then failwith "Generic lists cannot be nullable or options." else
+            if isCSNullable || isOption then failwith "Generic lists cannot be nullable or options." else
 
             let firstGenericArgument = t.GetGenericArguments().[0]
             if firstGenericArgument = typeof<bool> then failwith "Flags cannot be defined multiple times, List<bool> is therefore not supported." else
@@ -160,7 +165,7 @@ type ArgumentParser<'a>() =
             )
             |> _allowMultipleDefinitions .-> true
         elif t.IsGenericType then
-            failwith "Currently, the only supported generic arguments are F# options and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments which can be specified more than once."
+            failwith "The only supported generic argument types are F# options, and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments that can be specified multiple times."
         else result
         |> fun result ->
             getContentParser (result ^. _type) |> ignore // Check if the type is supported. Will throw if not.

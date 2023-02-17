@@ -11,16 +11,9 @@ module LensExtensions =
     let inline _key f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Key |> f
     let inline _value f (s : KeyValuePair<'k ,'v>) : Const<_, _> = s.Value |> f
 
-type ArgumentRequirement =
-    | AlwaysRequired
-    | RequiredIf of string * obj
-    | Optional
-    with
-    static member Zero = AlwaysRequired
-
 type ArgumentInfo =
     {
-        Requirement : ArgumentRequirement
+        RequirementType : ArgumentRequirementType
         Assigner : obj * obj -> unit
         Type : Type
         AllowMultipleDefinitions : bool
@@ -29,7 +22,7 @@ type ArgumentInfo =
     }
     with
     static member Zero = {
-        Requirement = zero
+        RequirementType = zero
         Assigner = ignore
         Type = typeof<string>
         AllowMultipleDefinitions = false
@@ -37,8 +30,8 @@ type ArgumentInfo =
         Description = ""
     }
 module ArgumentInfo =
-    let inline _requirement f s =
-        s.Requirement |> f <&> fun v -> { s with Requirement = v }
+    let inline _requirementType f s =
+        s.RequirementType |> f <&> fun v -> { s with RequirementType = v }
     let inline _type f s =
         s.Type |> f <&> fun v -> { s with Type = v }
     let inline _allowMultipleDefinitions f s =
@@ -128,7 +121,7 @@ module ParserState =
         |> Seq.collect (fun c -> c.SupportedArguments)
         |> f
     let inline _isRequired argumentInfo f s : Const<_, _> =
-        match argumentInfo ^. _requirement with
+        match argumentInfo ^. _requirementType with
         | AlwaysRequired -> true
         | Optional -> false
         | RequiredIf (name, value) when (value :? bool) ->

@@ -47,7 +47,7 @@ type MainArgument() =
 type RequiredIfArguments() =
     member val Predicate = "" with get, set
 
-    [<RequiredIf(nameof Unchecked.defaultof<RequiredIfArguments>.Predicate, "test")>]
+    [<ArgumentRequired(nameof Unchecked.defaultof<RequiredIfArguments>.Predicate, "test")>]
     member val RequiredIf : string option = None with get, set
 
     override _.GetHashCode() = 0
