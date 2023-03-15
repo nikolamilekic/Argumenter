@@ -24,6 +24,8 @@ let inline _argumentInfoExtended_assigner f = _3 <| f
 let inline _argumentInfoExtended_argumentInfo f = _4 <| f
 let inline _argumentInfoExtended_allowMultipleDefinitions f =
     _argumentInfoExtended_argumentInfo << _allowMultipleDefinitions <| f
+let inline _argumentInfoExtended_isMainArgument f =
+    _argumentInfoExtended_argumentInfo << _isMainArgument <| f
 let inline _argumentInfoExtended_assignmentKey commandInfo f s : Const<_, _> =
     (commandInfo, s ^. _argumentInfoExtended_argumentName) |> f
 let makeArgumentInfoExtended (info : PropertyInfo) =
@@ -107,13 +109,19 @@ let inline _commandInfoExtended_commandInfo f = _2 <| f
 let inline _commandInfoExtended_argumentInfosExtended f = _3 <| f
 let rec makeCommandInfosExtended relevantTypes results = function
     | [] -> results
-    | (currentType : Type, parent)::next ->
+    | (currentType : Type, parentInfo)::next ->
+        let parentHasMainArgument =
+            parentInfo |> Option.map snd |> Option.defaultValue false
+        let parent = parentInfo |> Option.map fst
         let argumentInfosExtended =
             getProperties currentType |> Seq.map makeArgumentInfoExtended |> Seq.toList
         let supportedArguments =
             argumentInfosExtended
             |> Seq.map (fun x -> x ^. _argumentInfoExtended_argumentName, x ^. _argumentInfoExtended_argumentInfo)
             |> Map.ofSeq
+        let hasMainArgument = argumentInfosExtended |> Seq.exists (view _argumentInfoExtended_isMainArgument)
+        if parentHasMainArgument && hasMainArgument then
+            failwith "At most one main argument can be defined per command chain."
         let currentCommandInfo = {
             Command =
                 if parent |> Option.isNone then ""
@@ -133,7 +141,7 @@ let rec makeCommandInfosExtended relevantTypes results = function
             |> Seq.filter (fun (t : Type) ->
                 t.BaseType = currentType &&
                 isNull (t.GetConstructor([||])) = false)
-            |> Seq.map (fun t -> t, Some currentCommandInfo)
+            |> Seq.map (fun t -> t, Some (currentCommandInfo, hasMainArgument))
             |> Seq.toList
         makeCommandInfosExtended relevantTypes (result::results) (children @ next)
 
