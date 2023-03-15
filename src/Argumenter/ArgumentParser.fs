@@ -331,32 +331,31 @@ let parser
                     | ParserResult.Success (o, state, _) -> parseSavedValues state ((o, x)::results) xs
                     | ParserResult.Failure _ -> Result.Error ()
             let tryApplySavedArgument (json : JsonElement) =
-                try
-                    let argumentName = x ^. _argument_argument
-                    let value = json.GetProperty(argumentName)
-                    let length = value.GetArrayLength()
-                    let values =
-                        seq { for i in 0 .. length - 1 do value[i].GetString() }
-                        |> Seq.toList
-                        |> parseSavedValues state []
-                    match values with
-                    | Result.Ok (vs, newState) ->
-                        let assignedState =
-                            let folder s (parsed, raw) =
-                                s
-                                |> _argument_assign x .-> parsed
-                                |> _argument_assign_raw x .-> raw
-                            List.fold folder  newState vs
-                        assignSavedArguments assignedState xs
-                    | Result.Error _ -> assignSavedArguments state xs
-                with _ -> assignSavedArguments state xs
+                let argumentName = x ^. _argument_argument
+                let present, value = json.TryGetProperty(argumentName)
+                if not present then assignSavedArguments state xs else
+
+                let length = value.GetArrayLength()
+                let values =
+                    seq { for i in 0 .. length - 1 do value[i].GetString() }
+                    |> Seq.toList
+                    |> parseSavedValues state []
+                match values with
+                | Result.Ok (vs, newState) ->
+                    let assignedState =
+                        let folder s (parsed, raw) =
+                            s
+                            |> _argument_assign x .-> parsed
+                            |> _argument_assign_raw x .-> raw
+                        List.fold folder  newState vs
+                    assignSavedArguments assignedState xs
+                | Result.Error _ -> assignSavedArguments state xs
             match x ^. _argument_commandName with
             | "" -> tryApplySavedArgument savedArguments
             | commandName ->
-                try
-                    let command = savedArguments.GetProperty(commandName)
-                    tryApplySavedArgument command
-                with _ -> assignSavedArguments state xs
+                let present, command = savedArguments.TryGetProperty(commandName)
+                if not present then assignSavedArguments state xs else
+                tryApplySavedArgument command
 
     eof >>. printHelp
     <|> pendingArgumentsParser ()
