@@ -19,3 +19,6 @@ type ArgumentRequiredAttribute(requirementType) =
         )
     new(requiredIf, requiredIfValue) =
         ArgumentRequiredAttribute(RequiredIf (requiredIf, requiredIfValue))
+
+[<AttributeUsage(AttributeTargets.Property)>]
+type SaveArgumentAttribute() = inherit Attribute()

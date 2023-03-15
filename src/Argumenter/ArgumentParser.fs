@@ -6,6 +6,8 @@ open System.ComponentModel
 open System.ComponentModel.DataAnnotations
 open System.Reflection
 open System.Text
+open System.Text.Json
+open System.Text.Json.Nodes
 open FSharpPlus
 open FSharpPlus.Data
 open FSharpPlus.Lens
@@ -33,7 +35,10 @@ let makeArgumentInfoExtended (info : PropertyInfo) =
     let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<List<_>>.GetGenericTypeDefinition()
     let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
     let mainArgumentAttributeSet = isNull (info.GetCustomAttribute(typeof<MainArgumentAttribute>)) = false
+    let saveArgument = isNull (info.GetCustomAttribute(typeof<SaveArgumentAttribute>)) = false
     let flag = t = typeof<bool>
+
+    if flag && saveArgument then failwith "Flags cannot be saved at this time." else
 
     let argumentInfo =
         zero
@@ -57,6 +62,7 @@ let makeArgumentInfoExtended (info : PropertyInfo) =
             match info.GetCustomAttribute(typeof<DescriptionAttribute>) with
             | :? DescriptionAttribute as x -> x.Description
             | _ -> ""
+        |> _saveArgument .-> saveArgument
 
     let result = (info.Name, t, (info.SetValue : obj * obj -> unit), argumentInfo)
     if isOption || isSystemNullable then
@@ -241,12 +247,15 @@ let help (executableName : string) state =
         printWithWordWrap "--help" "Prints a list of arguments and commands"
 
     sb.ToString()
-let parser (allSupportedArgumentParsers : Map<_, _>) : Parser<unit, ParserState> =
+let parser
+    (savedArguments : JsonElement)
+    (allSupportedArgumentParsers : Map<_, _>) : Parser<unit, ParserState> =
+
     let eof = eof <?> ""
     let printHelp = updateUserState (_help .-> true) >>. fail ""
     let rec pendingArgumentsParser () = getUserState >>= fun state ->
         let argumentParsers =
-            state ^. _pendingArguments
+            state ^. _pendingArguments true
             |> Seq.map (fun x ->
                 let name = x ^. _argument_argument
                 if x ^. _argument_isFlag then
@@ -259,15 +268,32 @@ let parser (allSupportedArgumentParsers : Map<_, _>) : Parser<unit, ParserState>
                     let isMainArgument = x ^. _argument_isMainArgument
                     let assignmentKey = x ^. _argument_assignmentKey
                     let contentParser = allSupportedArgumentParsers[assignmentKey]
+                    let captureState (s : CharStream<ParserState>) =
+                        Reply(CharStreamState(s))
+                    let contentWithRawString =
+                        captureState
+                        .>>. contentParser
+                        .>>. captureState
+                        >>= fun ((startS, value), endS) -> fun stream ->
+                            let startPosition = startS.GetIndex(stream)
+                            let endPosition = endS.GetIndex(stream)
+                            let length = endPosition - startPosition - 1L
+                            stream.BacktrackTo(startS)
+                            let rawString = stream.Read(int length)
+                            stream.BacktrackTo(endS)
+                            Reply((value, rawString))
                     let fullArgumentParser =
-                        skipStringCI $"--{name}" >>. spaces1 >>. contentParser
+                        skipStringCI $"--{name}" >>. spaces1 >>. contentWithRawString
                     let finalParser =
-                        if isMainArgument then contentParser <|> fullArgumentParser
+                        if isMainArgument then contentWithRawString <|> fullArgumentParser
                         else fullArgumentParser
 
                     spaces >>. finalParser .>> spaces
-                    >>= (fun value ->
-                        updateUserState (_argument_assign x .-> value))
+                    >>= (fun (value, rawString) ->
+                        _argument_assign x .-> value
+                        >> _argument_assign_raw x .-> rawString
+                        |> updateUserState
+                    )
                     <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
         let commandParsers =
             state ^. _pendingCommands
@@ -282,11 +308,53 @@ let parser (allSupportedArgumentParsers : Map<_, _>) : Parser<unit, ParserState>
         |> Seq.append [|skipStringCI "--help" <?> "--help" >>. printHelp|]
         |> choice
         >>= fun () -> eof <|> pendingArgumentsParser ()
+    let rec assignSavedArguments state : _ -> ParserState = function
+        | [] -> state
+        | x:_ * _ * _::xs ->
+            let assignmentKey = x ^. _argument_assignmentKey
+            let parser = allSupportedArgumentParsers[assignmentKey]
+
+            let rec parseSavedValues state results = function
+                | [] -> Result.Ok (results, state)
+                | x::xs ->
+                    match runParserOnString parser state "" x with
+                    | ParserResult.Success (o, state, _) -> parseSavedValues state ((o, x)::results) xs
+                    | ParserResult.Failure _ -> Result.Error ()
+            let tryApplySavedArgument (json : JsonElement) =
+                try
+                    let argumentName = x ^. _argument_argument
+                    let value = json.GetProperty(argumentName)
+                    let length = value.GetArrayLength()
+                    let values =
+                        seq { for i in 0 .. length - 1 do value[i].GetString() }
+                        |> Seq.toList
+                        |> parseSavedValues state []
+                    match values with
+                    | Result.Ok (vs, newState) ->
+                        let assignedState =
+                            let folder s (parsed, raw) =
+                                s
+                                |> _argument_assign x .-> parsed
+                                |> _argument_assign_raw x .-> raw
+                            List.fold folder  newState vs
+                        assignSavedArguments assignedState xs
+                    | Result.Error _ -> assignSavedArguments state xs
+                with _ -> assignSavedArguments state xs
+            match x ^. _argument_commandName with
+            | "" -> tryApplySavedArgument savedArguments
+            | commandName ->
+                try
+                    let command = savedArguments.GetProperty(commandName)
+                    tryApplySavedArgument command
+                with _ -> assignSavedArguments state xs
 
     eof >>. printHelp
-    <|> pendingArgumentsParser () >>. getUserState >>= fun state ->
-        match state ^. _missingArguments |> Seq.toList with
-        | [] -> preturn ()
+    <|> pendingArgumentsParser ()
+    >>. getUserState >>= fun state ->
+        let pending = state ^. _pendingArguments false |> Seq.toList
+        let newState = assignSavedArguments state pending
+        match newState ^. _missingArguments |> Seq.toList with
+        | [] -> setUserState newState
         | missing ->
             let missing = missing |> Seq.map (view _argument_argument)
             let missingString = String.concat ", " missing
@@ -313,8 +381,11 @@ let parse parameters : Result<_, _> = monad.strict {
     let allAssigners = makeCommandInfoAssignmentMap (view _argumentInfoExtended_assigner)
     let initialState = makeState rootType commandInfosExtended
     let args = parameters ^. _arguments
+    let savedArguments : JsonElement =
+        try JsonSerializer.Deserialize(parameters ^. _savedArguments)
+        with _ -> JsonElement()
     let! result =
-        match runParserOnString (parser allSupportedArgumentParsers) initialState "" args with
+        match runParserOnString (parser savedArguments allSupportedArgumentParsers) initialState "" args with
         | ParserResult.Success (_, state, _) -> Result.Ok state
         | ParserResult.Failure (_, _, state) when state ^. _help ->
             let executableName = parameters ^. _executableName
@@ -337,7 +408,36 @@ let parse parameters : Result<_, _> = monad.strict {
         |> List.tryFind (fun x ->
             x ^. _commandInfoExtended_commandInfo = resultCommand)
     let targetType = resultCommandInfoExtended.Value ^. _commandInfoExtended_commandType
-    let argumentObject = Activator.CreateInstance targetType
-    for assigner in assigners do assigner argumentObject
-    return argumentObject :?> 'a
+    let target = Activator.CreateInstance targetType
+    for assigner in assigners do assigner target
+
+    let argumentsToSave =
+        result ^. _valuesToSave
+        |> Seq.groupBy (fun kvp -> (fst kvp.Key).Command)
+        |> Seq.collect (fun (command, values) -> seq {
+            match command with
+            | "" ->
+                for kvp in values do
+                    let array = JsonArray()
+                    for value in kvp.Value |> Seq.rev do
+                        array.Add(JsonValue.Create(value))
+                    yield (kvp.Key |> snd, array :> JsonNode)
+            | command ->
+                let commandObject = JsonObject()
+                for kvp in values do
+                    let array = JsonArray()
+                    for value in kvp.Value |> Seq.rev do
+                        array.Add(JsonValue.Create(value))
+                    commandObject.Add(kvp.Key |> snd, array)
+                yield (command, commandObject :> JsonNode)
+        })
+        |> fun nodes ->
+            let result = JsonObject()
+            for k, v in nodes do
+                result.Add(k, v)
+            result.ToJsonString(JsonSerializerOptions(WriteIndented=true))
+
+    let targetCasted = target :?> 'a
+    let result = targetCasted, argumentsToSave
+    return result
 }

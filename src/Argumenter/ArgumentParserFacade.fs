@@ -10,6 +10,8 @@ open ParserParameters
 type ArgumentParser<'a>(parameters) =
     new() = ArgumentParser<'a>(Create<'a> ())
 
+    member val ArgumentsToSave = "" with get, set
+
     member _.Help () =
         let executableName = parameters ^. _executableName
         let relevantTypes = parameters ^. _relevantTypes
@@ -21,10 +23,15 @@ type ArgumentParser<'a>(parameters) =
         ArgumentParser<'a>(parameters |> _executableName .-> name)
     member _.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
         ArgumentParser<'a>(parameters |> _contentParser_force typeof<'arg> .-> (parser |>> box))
-    member _.Parse(args : string) : Result<'a, string> =
-        parameters
+    member _.WithSavedArguments(savedArguments : string) =
+        ArgumentParser<'a>(parameters |> _savedArguments .-> savedArguments)
+    member this.Parse(args : string) : Result<'a, string> =
+        (parameters
         |> _arguments .-> args
-        |> ArgumentParser.parse
+        |> parse)
+        |> Result.map (fun (result, argumentsToSave) ->
+            this.ArgumentsToSave <- argumentsToSave
+            result)
     member this.Parse() =
         let firstCommandLineArg = Environment.GetCommandLineArgs()[0]
         let rawArguments = Environment.CommandLine[firstCommandLineArg.Length..].Trim()

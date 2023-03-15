@@ -20,7 +20,8 @@ let inline _allSupportedArguments f s : Const<_, _> =
 let inline _argument_command f = _1 <| f
 let inline _argument_argument f = _2 <| f
 let inline _argument_argumentInfo f = _3 <| f
-
+let inline _argument_commandName f s : Const<_, _> =
+    (s ^. _argument_command).Command |> f
 let inline _argument_allowMultipleDefinitions f : _ -> Const<_, _> =
     _argument_argumentInfo << _allowMultipleDefinitions <| f
 let inline _argument_isFlag f : _ -> Const<_, _> =
@@ -33,14 +34,25 @@ let inline _argument_requirementType f : _ -> Const<_, _> =
     _argument_argumentInfo << _requirementType <| f
 let inline _argument_assignmentKey f s : Const<_, _> =
     (s ^. _argument_command, s ^. _argument_argument) |> f
-
+let inline _argument_saveArgument f : _ -> Const<_, _> =
+    _argument_argumentInfo << _saveArgument <| f
 let inline _argument_assign x f s : Identity<_> =
     let assignmentKey = x ^. _argument_assignmentKey
     f ignore <&> fun v ->
         match s.AssignedValues |> Map.tryFind assignmentKey with
-        | Some ai ->
-            { s with AssignedValues = s.AssignedValues.Add(assignmentKey, v::ai) }
+        | Some vs ->
+            { s with AssignedValues = s.AssignedValues.Add(assignmentKey, v::vs) }
         | _ -> { s with AssignedValues = s.AssignedValues.Add(assignmentKey, [v]) }
+let inline _argument_assign_raw x f s : Identity<_> =
+    let assignmentKey = x ^. _argument_assignmentKey
+    let save = x ^. _argument_saveArgument
+    f ignore <&> fun v ->
+        if not save then s else
+
+        match s.ValuesToSave |> Map.tryFind assignmentKey with
+        | Some ai ->
+            { s with ValuesToSave = s.ValuesToSave.Add(assignmentKey, v::ai) }
+        | _ -> { s with ValuesToSave = s.ValuesToSave.Add(assignmentKey, [v]) }
 let inline _argument_assigned x f s : Const<_, _> =
     let assignmentKey = x ^. _argument_assignmentKey
     s.AssignedValues.TryFind assignmentKey
@@ -80,10 +92,10 @@ let inline _missingArguments f s : Const<_, _> =
         let assigned = s ^. _argument_assigned x
         isRequired && not assigned)
     |> f
-let inline _pendingArguments f s : Const<_, _> =
+let inline _pendingArguments includeMultiple f s : Const<_, _> =
     s ^. _allSupportedArguments
     |> Seq.filter (fun x ->
-        let allowMultipleSelection = x ^. _argument_allowMultipleDefinitions
+        let allowMultipleSelection = includeMultiple && x ^. _argument_allowMultipleDefinitions
         let assigned = s ^. _argument_assigned x
         allowMultipleSelection || not assigned
     )

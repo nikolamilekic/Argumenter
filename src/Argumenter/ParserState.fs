@@ -9,6 +9,7 @@ type ParserState =
         CurrentCommand : CommandInfo
         AllCommands : CommandInfo list
         AssignedValues : Map<CommandInfo * string, obj list>
+        ValuesToSave : Map<CommandInfo * string, string list>
         Help : bool
     }
     with
@@ -21,6 +22,7 @@ type ParserState =
             Description = ""
         }
         AssignedValues = Map.empty
+        ValuesToSave = Map.empty
         Help = false
     }
 and [<StructuralComparison; StructuralEquality>] CommandInfo = {
@@ -36,6 +38,8 @@ module ParserState =
         s.AllCommands |> f <&> fun v -> { s with AllCommands = v }
     let inline _assignedValues f s =
         s.AssignedValues |> f <&> fun v -> { s with AssignedValues = v }
+    let inline _valuesToSave f s =
+        s.ValuesToSave |> f <&> fun v -> { s with ValuesToSave = v }
     let inline _help f s =
         s.Help |> f <&> fun v -> { s with Help = v }
     let inline _commandPath f s : Const<_, _> =

@@ -12,6 +12,7 @@ type ArgumentInfo =
         AllowMultipleDefinitions : bool
         ArgumentType : ArgumentType
         Description : string
+        SaveArgument : bool
     }
     with
     static member Zero = {
@@ -19,6 +20,7 @@ type ArgumentInfo =
         AllowMultipleDefinitions = false
         ArgumentType = zero
         Description = ""
+        SaveArgument = false
     }
 and ArgumentType =
     Regular | Flag | Main
@@ -34,3 +36,4 @@ module ArgumentInfo =
     let inline _isFlag f s = s.ArgumentType = Flag |> f
     let inline _description f s =
         s.Description |> f <&> fun v -> { s with Description = v }
+    let inline _saveArgument f s = s.SaveArgument |> f <&> fun v -> { s with SaveArgument = v }
