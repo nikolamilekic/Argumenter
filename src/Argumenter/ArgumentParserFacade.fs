@@ -22,7 +22,7 @@ type ArgumentParser<'a>(parameters) =
     member _.WithExecutableName(name : string) =
         ArgumentParser<'a>(parameters |> _executableName .-> name)
     member _.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
-        ArgumentParser<'a>(parameters |> _contentParser_force typeof<'arg> .-> (parser |>> box))
+        ArgumentParser<'a>(parameters |> _contentParser typeof<'arg> .-> Some (parser |>> box))
     member _.WithSavedArguments(savedArguments : string) =
         ArgumentParser<'a>(parameters |> _savedArguments .-> savedArguments)
     member this.Parse(args : string) : Result<'a, string> =

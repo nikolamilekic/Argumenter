@@ -31,11 +31,10 @@ module ParserParameters =
         <&> function
             | Some v -> s |> _contentParsers %-> fun x -> x.SetItem(t, v)
             | None -> s |> _contentParsers %-> fun x -> x.Remove(t)
-    let inline _contentParser_force t f s =
+    let _contentParser_force t f s : Const<_, _> =
         match s ^. _contentParser t with
         | Some x -> f x
         | _ -> failwith $"{t.Name} is not a supported argument type."
-        <&> fun v -> s |> _contentParser t .-> Some v
     let inline _savedArguments f s = f s.SavedArguments <&> fun v -> { s with SavedArguments = v }
 
     let singleWordString =
