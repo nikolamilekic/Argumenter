@@ -366,7 +366,11 @@ let parser
         match newState ^. _missingArguments |> Seq.toList with
         | [] -> setUserState newState
         | missing ->
-            let missing = missing |> Seq.map (view _argument_argument)
+            let missing =
+                missing
+                |> Seq.map (fun x ->
+                    let missing = x ^. _argument_argument
+                    $"--{missing.ToLower()}")
             let missingString = String.concat ", " missing
             fail $"The following required arguments are missing: {missingString}"
 let parse parameters : Result<_, _> = monad.strict {
