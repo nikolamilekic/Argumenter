@@ -32,7 +32,13 @@ type ArgumentParser<'a>(parameters) =
         |> Result.map (fun (result, argumentsToSave) ->
             this.ArgumentsToSave <- argumentsToSave
             result)
-    member this.Parse() =
-        let firstCommandLineArg = Environment.GetCommandLineArgs()[0]
-        let rawArguments = Environment.CommandLine[firstCommandLineArg.Length..].Trim()
-        this.Parse(rawArguments)
+    member this.Parse(args : string[]) : Result<'a, string> =
+        let args =
+            args
+            |> Seq.map(fun x ->
+                if x.StartsWith("\"") && x.EndsWith("\"") then x
+                elif x.Contains(' ') then $"\"{x}\""
+                else x)
+        let argsString = String.Join(" ", args)
+        this.Parse(argsString)
+    member this.Parse() = this.Parse(Environment.GetCommandLineArgs() |> Array.skip 1)
