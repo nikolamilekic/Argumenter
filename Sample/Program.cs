@@ -1,8 +1,9 @@
 using System.ComponentModel;
 using Argumenter;
 
-var savedArguments = "{ \"Required2\": [\"2\"], \"ChildCommand\": { \"ChildArgument\": [\"22\"] } }";
+//var savedArguments = "{ \"Required2\": [\"2\"], \"ChildCommand\": { \"ChildArgument\": [\"22\"] } }";
 
+var savedArguments = File.Exists("Saved.json") ? File.ReadAllText("Saved.json") : "{}";
 var parser = new ArgumentParser<Arguments>().WithSavedArguments(savedArguments);
 var result = parser.Parse();
 
@@ -13,6 +14,7 @@ if (result.IsOk)
 
     Console.WriteLine("SAVED ARGUMENTS");
     Console.WriteLine(parser.ArgumentsToSave);
+    File.WriteAllText("Saved.json", parser.ArgumentsToSave);
 }
 else
 {

@@ -287,11 +287,11 @@ let parser
                         >>= fun ((startS, value), endS) -> fun stream ->
                             let startPosition = startS.GetIndex(stream)
                             let endPosition = endS.GetIndex(stream)
-                            let length = endPosition - startPosition - 1L
+                            let length = endPosition - startPosition
                             stream.BacktrackTo(startS)
                             let rawString = stream.Read(int length)
                             stream.BacktrackTo(endS)
-                            Reply((value, rawString))
+                            Reply((value, rawString.Trim()))
                     let fullArgumentParser =
                         skipStringCI $"--{name}" >>. spaces1 >>. contentWithRawString
                     let finalParser =
