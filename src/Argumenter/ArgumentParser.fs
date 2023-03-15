@@ -103,6 +103,7 @@ let getProperties (t : Type) =
         ||| BindingFlags.GetProperty
         ||| BindingFlags.SetProperty
     )
+    |> Seq.filter (fun p -> p.CanRead && p.CanWrite)
 
 let inline _commandInfoExtended_commandType f = _1 <| f
 let inline _commandInfoExtended_commandInfo f = _2 <| f
