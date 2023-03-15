@@ -165,22 +165,23 @@ let help (executableName : string) state =
         " ",
         commandPath |> Seq.map (fun c -> c.Command.ToLower()) |> Seq.filter (fun s -> s <> ""))
     let currentCommand = state ^. _currentCommand
-    sb.Append($"{executableName.ToLower()}") |> ignore
-    if commandPathString <> "" then
-        sb.Append($" {commandPathString}") |> ignore
-
     let mainArgument =
         currentCommand.SupportedArguments
         |> Seq.tryFind (fun kvp -> kvp.Value ^. _isMainArgument)
-    match mainArgument with
-    | Some kvp ->
-        let name = kvp.Key
-        let info = kvp.Value
-        let argumentInfoExtended = currentCommand, name, info
-        if state ^. _argument_isRequired argumentInfoExtended
-        then sb.AppendLine($" <{name.ToLower()}>\n") |> ignore
-        else sb.AppendLine($" [<{name.ToLower()}>]\n") |> ignore
-    | None -> sb.AppendLine("\n") |> ignore
+
+    if commandPathString <> "" || mainArgument |> Option.isSome then
+        sb.Append($"{executableName.ToLower()}") |> ignore
+        sb.Append($" {commandPathString}") |> ignore
+
+        match mainArgument with
+        | Some kvp ->
+            let name = kvp.Key
+            let info = kvp.Value
+            let argumentInfoExtended = currentCommand, name, info
+            if state ^. _argument_isRequired argumentInfoExtended
+            then sb.AppendLine($" <{name.ToLower()}>\n") |> ignore
+            else sb.AppendLine($" [<{name.ToLower()}>]\n") |> ignore
+        | None -> sb.AppendLine("\n") |> ignore
 
     if currentCommand.Description <> "" then
         sb.AppendLine(currentCommand.Description).AppendLine("") |> ignore
