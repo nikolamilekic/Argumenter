@@ -44,6 +44,16 @@ type ArgumentParser<'a>() =
             typeof<uint32>, puint32 |>> box
             typeof<uint64>, puint64 |>> box
             typeof<bool>, fail "Bools are handled as flags. This should never be triggered"
+            typeof<DateTimeOffset>,
+                many1CharsTill anyChar spaces1 >>= fun x ->
+                match DateTimeOffset.TryParse x with
+                | true, result -> preturn result
+                | _ -> fail $"{x} is not a valid date/time."
+            typeof<DateTime>,
+                many1CharsTill anyChar spaces1 >>= fun x ->
+                match DateTime.TryParse x with
+                | true, result -> preturn result
+                | _ -> fail $"{x} is not a valid date/time."
         ] |> Seq.map KeyValuePair.Create)
     let getContentParser (t : Type) =
         match contentParsers.TryGetValue t with
