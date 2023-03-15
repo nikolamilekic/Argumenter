@@ -1,4 +1,4 @@
-﻿namespace Argumenter
+﻿module Argumenter.ArgumentParser
 
 open System
 open System.Collections.Generic
@@ -7,347 +7,337 @@ open System.ComponentModel.DataAnnotations
 open System.Reflection
 open System.Text
 open FSharpPlus
+open FSharpPlus.Data
 open FSharpPlus.Lens
 open FParsec
 
 open ArgumentInfo
 open ParserState
+open ParserParameters
+open MainLenses
 
-type ArgumentParser<'a>() =
-    let callingAssembly = Assembly.GetCallingAssembly()
-    let mutable executableName = callingAssembly.GetName().Name + ".exe"
-    let relevantTypes =
-        callingAssembly.GetTypes()
-        |> Seq.filter(fun t -> t.IsAssignableTo typeof<'a>)
-        |> Seq.toList
+let inline _argumentInfoExtended_argumentName f = _1 <| f
+let inline _argumentInfoExtended_argumentType f = _2 <| f
+let inline _argumentInfoExtended_assigner f = _3 <| f
+let inline _argumentInfoExtended_argumentInfo f = _4 <| f
+let inline _argumentInfoExtended_allowMultipleDefinitions f =
+    _argumentInfoExtended_argumentInfo << _allowMultipleDefinitions <| f
+let inline _argumentInfoExtended_assignmentKey commandInfo f s : Const<_, _> =
+    (commandInfo, s ^. _argumentInfoExtended_argumentName) |> f
+let makeArgumentInfoExtended (info : PropertyInfo) =
+    let t = info.PropertyType
 
-    let Ok = Result.Ok
-    let Error = Result.Error
+    let isCSNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
+    let isSystemNullable = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Nullable<_>>.GetGenericTypeDefinition()
+    let isOption = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Option<_>>.GetGenericTypeDefinition()
+    let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<List<_>>.GetGenericTypeDefinition()
+    let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
+    let mainArgumentAttributeSet = isNull (info.GetCustomAttribute(typeof<MainArgumentAttribute>)) = false
+    let flag = t = typeof<bool>
 
-    let singleWordString =
-        notFollowedByString "--"
-        >>. notFollowedByString "\""
-        >>. many1CharsTill anyChar (spaces1 <|> eof)
-    let multiWordString =
-        skipString "\"" >>. many1CharsTill anyChar (skipString "\"")
-    let stringArgument = (multiWordString <|> singleWordString) <?> "string"
-    let contentParsers = Dictionary<Type, Parser<_, _>>(
-        [
-            typeof<string>, stringArgument |>> box
-            typeof<double>, pfloat |>> box
-            typeof<int8>, pint8 |>> box
-            typeof<int16>, pint16 |>> box
-            typeof<int32>, pint32 |>> box
-            typeof<int64>, pint64 |>> box
-            typeof<uint8>, puint8 |>> box
-            typeof<uint16>, puint16 |>> box
-            typeof<uint32>, puint32 |>> box
-            typeof<uint64>, puint64 |>> box
-            typeof<bool>, fail "Bools are handled as flags. This should never be triggered"
-            typeof<DateTimeOffset>,
-                many1CharsTill anyChar spaces1 >>= fun x ->
-                match DateTimeOffset.TryParse x with
-                | true, result -> preturn result
-                | _ -> fail $"{x} is not a valid date/time."
-            typeof<DateTime>,
-                many1CharsTill anyChar spaces1 >>= fun x ->
-                match DateTime.TryParse x with
-                | true, result -> preturn result
-                | _ -> fail $"{x} is not a valid date/time."
-        ] |> Seq.map KeyValuePair.Create)
-    let getContentParser (t : Type) =
-        match contentParsers.TryGetValue t with
-        | true, x -> x
-        | _ -> failwith $"{t.Name} is not a supported argument type."
+    let argumentInfo =
+        zero
+        |> _argumentType .->
+            if flag && not mainArgumentAttributeSet then Flag
+            elif not flag && mainArgumentAttributeSet then Main
+            elif not flag && not mainArgumentAttributeSet then Regular
+            else failwith "Flags cannot be main arguments."
+        |> _requirementType .->
+            if t = typeof<bool> then Optional else // Flags are always optional
+            match info.GetCustomAttribute(typeof<ArgumentRequiredAttribute>) with
+            | :? ArgumentRequiredAttribute as x ->
+                if requiredAttributeSet then failwith "Required and ArgumentRequired attributes cannot be set at the same time." else
+                x.RequirementType
+            | _ ->
+                if requiredAttributeSet then AlwaysRequired
+                elif isCSNullable || isSystemNullable || isOption || isGenericList
+                then Optional
+                else AlwaysRequired
+        |> _description .->
+            match info.GetCustomAttribute(typeof<DescriptionAttribute>) with
+            | :? DescriptionAttribute as x -> x.Description
+            | _ -> ""
 
-    let parser : Parser<unit, ParserState> =
-        let eof = eof <?> ""
-        let printHelp = updateUserState (_help .-> true) >>. fail ""
-        let rec pendingArgumentsParser () = getUserState >>= fun state ->
-            let argumentParsers =
-                state ^. _pendingArguments
-                |> Seq.map (fun kvp ->
-                    let argumentType = kvp ^. _argument_type
-                    let name = kvp ^. _key
-                    if argumentType = typeof<bool> then
-                        let parser = skipStringCI $"--{name}"
-                        spaces >>. parser .>> spaces
-                        >>= (fun () -> updateUserState (_assign kvp .-> true))
-                        <?> $"[--{name.ToLower()}]"
-                    else
-                        let required = state ^. _isRequired (kvp ^. _value)
-                        let isMainArgument = kvp ^. _argument_isMainArgument
-                        let contentParser = getContentParser argumentType
-                        let fullArgumentParser =
-                            skipStringCI $"--{name}" >>. spaces1 >>. contentParser
-                        let finalParser =
-                            if isMainArgument then contentParser <|> fullArgumentParser
-                            else fullArgumentParser
+    let result = (info.Name, t, (info.SetValue : obj * obj -> unit), argumentInfo)
+    if isOption || isSystemNullable then
+        // Nullable (or optional) flags are nonsensical
+        if t = typeof<bool> then failwith "Flags cannot be nullable or options." else
 
-                        spaces >>. finalParser .>> spaces
-                        >>= (fun value ->
-                            updateUserState (_assign kvp .-> value))
-                        <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
-            let commandParsers =
-                state ^. _pendingCommands
-                |> Seq.map (fun command ->
-                    spaces
-                    >>. (pstringCI command.Command <|> pstringCI $"--{command.Command}")
-                    >>. spaces
-                    >>= (fun () -> updateUserState (_currentCommand .-> command))
-                    <?> $"{command.Command.ToLower()}")
-            argumentParsers
-            |> Seq.append commandParsers
-            |> Seq.append [|skipStringCI "--help" <?> "--help" >>. printHelp|]
-            |> choice
-            >>= fun () -> eof <|> pendingArgumentsParser ()
-
-        eof >>. printHelp
-        <|> pendingArgumentsParser () >>. getUserState >>= fun state ->
-            match state ^. _missingArguments |> Seq.toList with
-            | [] -> preturn ()
-            | missing ->
-                let missingString = String.concat ", " missing
-                fail $"The following required arguments are missing: {missingString}"
-
-    let getProperties (t : Type) =
-        t.GetProperties(
-            BindingFlags.Public
-            ||| BindingFlags.DeclaredOnly
-            ||| BindingFlags.Instance
-            ||| BindingFlags.GetProperty
-            ||| BindingFlags.SetProperty
+        let firstGenericArgument = t.GetGenericArguments().[0]
+        result
+        |> _argumentInfoExtended_argumentType .-> firstGenericArgument
+        |> _argumentInfoExtended_assigner .-> (fun (o, v) ->
+            let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
+            info.SetValue(o, value)
         )
-    let getArgumentInfo (info : PropertyInfo) =
-        let t = info.PropertyType
+    elif isCSNullable then result
+    elif isGenericList then
+        if isCSNullable || isOption then failwith "Generic lists cannot be nullable or options." else
 
-        let isCSNullable = NullabilityInfoContext().Create(info).WriteState = NullabilityState.Nullable
-        let isSystemNullable = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Nullable<_>>.GetGenericTypeDefinition()
-        let isOption = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<Option<_>>.GetGenericTypeDefinition()
-        let isGenericList = t.IsGenericType && t.GetGenericTypeDefinition() = typeof<List<_>>.GetGenericTypeDefinition()
-        let requiredAttributeSet = isNull (info.GetCustomAttribute(typeof<RequiredAttribute>)) = false
-        let mainArgumentAttributeSet = isNull (info.GetCustomAttribute(typeof<MainArgumentAttribute>)) = false
+        let firstGenericArgument = t.GetGenericArguments().[0]
+        if firstGenericArgument = typeof<bool> then failwith "Flags cannot be defined multiple times, List<bool> is therefore not supported." else
 
-        let result =
-            zero
-            |> _isMainArgument .-> mainArgumentAttributeSet
-            |> _type .-> t
-            |> _assigner .-> info.SetValue
-            |> _requirementType .->
-                if t = typeof<bool> then Optional else // Flags are always optional
-                match info.GetCustomAttribute(typeof<ArgumentRequiredAttribute>) with
-                | :? ArgumentRequiredAttribute as x ->
-                    if requiredAttributeSet then failwith "Required and ArgumentRequired attributes cannot be set at the same time." else
-                    x.RequirementType
-                | _ ->
-                    if requiredAttributeSet then AlwaysRequired
-                    elif isCSNullable || isSystemNullable || isOption || isGenericList
-                    then Optional
-                    else AlwaysRequired
-            |> _description .->
-                match info.GetCustomAttribute(typeof<DescriptionAttribute>) with
+        result
+        |> _argumentInfoExtended_argumentType .-> firstGenericArgument
+        |> _argumentInfoExtended_assigner .-> (fun (o, v) ->
+            let list = info.GetValue(o) :?> System.Collections.IList
+            list.Add(v) |> ignore
+        )
+        |> _argumentInfoExtended_allowMultipleDefinitions .-> true
+    elif t.IsGenericType then
+        failwith "The only supported generic argument types are F# options, and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments that can be specified multiple times."
+    else result
+let getProperties (t : Type) =
+    t.GetProperties(
+        BindingFlags.Public
+        ||| BindingFlags.DeclaredOnly
+        ||| BindingFlags.Instance
+        ||| BindingFlags.GetProperty
+        ||| BindingFlags.SetProperty
+    )
+
+let inline _commandInfoExtended_commandType f = _1 <| f
+let inline _commandInfoExtended_commandInfo f = _2 <| f
+let inline _commandInfoExtended_argumentInfosExtended f = _3 <| f
+let rec makeCommandInfosExtended relevantTypes results = function
+    | [] -> results
+    | (currentType : Type, parent)::next ->
+        let argumentInfosExtended =
+            getProperties currentType |> Seq.map makeArgumentInfoExtended |> Seq.toList
+        let supportedArguments =
+            argumentInfosExtended
+            |> Seq.map (fun x -> x ^. _argumentInfoExtended_argumentName, x ^. _argumentInfoExtended_argumentInfo)
+            |> Map.ofSeq
+        let currentCommandInfo = {
+            Command =
+                if parent |> Option.isNone then ""
+                elif currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
+                then currentType.Name.Substring(0, currentType.Name.Length - 9)
+                else currentType.Name
+            SupportedArguments = supportedArguments
+            Parent = parent
+            Description =
+                match currentType.GetCustomAttribute(typeof<DescriptionAttribute>) with
                 | :? DescriptionAttribute as x -> x.Description
                 | _ -> ""
+        }
+        let result = (currentType, currentCommandInfo, argumentInfosExtended)
+        let children =
+            relevantTypes
+            |> Seq.filter (fun (t : Type) ->
+                t.BaseType = currentType &&
+                isNull (t.GetConstructor([||])) = false)
+            |> Seq.map (fun t -> t, Some currentCommandInfo)
+            |> Seq.toList
+        makeCommandInfosExtended relevantTypes (result::results) (children @ next)
 
-        if isOption || isSystemNullable then
-            // Nullable (or optional) flags are nonsensical
-            if t = typeof<bool> then failwith "Flags cannot be nullable or options." else
-
-            let firstGenericArgument = t.GetGenericArguments().[0]
-            result
-            |> _type .-> firstGenericArgument
-            |> _assigner .-> (fun (o, v) ->
-                let value = t.GetConstructor([|firstGenericArgument|]).Invoke([|v|])
-                info.SetValue(o, value)
-            )
-        elif isCSNullable then result
-        elif isGenericList then
-            if isCSNullable || isOption then failwith "Generic lists cannot be nullable or options." else
-
-            let firstGenericArgument = t.GetGenericArguments().[0]
-            if firstGenericArgument = typeof<bool> then failwith "Flags cannot be defined multiple times, List<bool> is therefore not supported." else
-
-            result
-            |> _type .-> t.GetGenericArguments().[0]
-            |> _assigner .-> (fun (o, v) ->
-                let list = info.GetValue(o) :?> System.Collections.IList
-                list.Add(v) |> ignore
-            )
-            |> _allowMultipleDefinitions .-> true
-        elif t.IsGenericType then
-            failwith "The only supported generic argument types are F# options, and generic lists (List<T>, ResizeArray-s in F#), which are used to capture arguments that can be specified multiple times."
-        else result
-        |> fun result ->
-            getContentParser (result ^. _type) |> ignore // Check if the type is supported. Will throw if not.
-            result
-
-    member private _.GetCommandInfos() =
-        let rec inner results = function
-            | [] -> results
-            | (currentType, parent)::next ->
-                let argumentInfos =
-                    getProperties currentType
-                    |> Array.map (fun p -> p.Name, getArgumentInfo p)
-                    |> Map.ofSeq
-                let currentCommandInfo = {
-                    Command =
-                        if parent |> Option.isNone then ""
-                        elif currentType.Name.EndsWith("arguments", StringComparison.InvariantCultureIgnoreCase)
-                        then currentType.Name.Substring(0, currentType.Name.Length - 9)
-                        else currentType.Name
-                    SupportedArguments = argumentInfos
-                    Parent = parent
-                    Description =
-                        match currentType.GetCustomAttribute(typeof<DescriptionAttribute>) with
-                        | :? DescriptionAttribute as x -> x.Description
-                        | _ -> ""
-                }
-                let children =
-                    relevantTypes
-                    |> Seq.filter (fun t ->
-                        t.BaseType = currentType &&
-                        isNull (t.GetConstructor([||])) = false)
-                    |> Seq.map (fun t -> t, Some currentCommandInfo)
-                    |> Seq.toList
-                inner ((currentCommandInfo, currentType)::results) (children @ next)
-        inner [] [(typeof<'a>, None)]
-    member private _.MakeState(commandInfos) =
-        let rootCommand = commandInfos |> List.find (fun (_, t) -> t = typeof<'a>) |> fst
-        let allCommands = commandInfos |> List.map fst
+let makeState rootType commandInfosExtended =
+    let rootCommand =
+        (commandInfosExtended
+        |> List.find (fun x -> x ^. _commandInfoExtended_commandType = rootType))
+        ^. _commandInfoExtended_commandInfo
+    let allCommands = commandInfosExtended |> List.map (view _commandInfoExtended_commandInfo)
+    let parserState =
         zero
         |> _currentCommand .-> rootCommand
         |> _allCommands .-> allCommands
-    member _.Help(state) =
-        let sb = StringBuilder()
+    parserState
+let help (executableName : string) state =
+    let sb = StringBuilder()
 
-        let commandPath = state ^. _commandPath
-        let commandPathString = String.Join(
-            " ",
-            commandPath |> Seq.map (fun c -> c.Command.ToLower()) |> Seq.filter (fun s -> s <> ""))
-        let currentCommand = state ^. _currentCommand
-        sb.Append($"{executableName.ToLower()}") |> ignore
-        if commandPathString <> "" then
-            sb.Append($" {commandPathString}") |> ignore
+    let commandPath = state ^. _commandPath
+    let commandPathString = String.Join(
+        " ",
+        commandPath |> Seq.map (fun c -> c.Command.ToLower()) |> Seq.filter (fun s -> s <> ""))
+    let currentCommand = state ^. _currentCommand
+    sb.Append($"{executableName.ToLower()}") |> ignore
+    if commandPathString <> "" then
+        sb.Append($" {commandPathString}") |> ignore
 
-        let mainArgument =
-            currentCommand.SupportedArguments
-            |> Seq.tryFind (view _argument_isMainArgument)
-        match mainArgument with
-        | Some kvp ->
-            let name = kvp ^. _key
-            let info = kvp ^. _value
-            if state ^. _isRequired info
-            then sb.AppendLine($" <{name.ToLower()}>\n") |> ignore
-            else sb.AppendLine($" [<{name.ToLower()}>]\n") |> ignore
-        | None -> sb.AppendLine("\n") |> ignore
+    let mainArgument =
+        currentCommand.SupportedArguments
+        |> Seq.tryFind (fun kvp -> kvp.Value ^. _isMainArgument)
+    match mainArgument with
+    | Some kvp ->
+        let name = kvp.Key
+        let info = kvp.Value
+        let argumentInfoExtended = currentCommand, name, info
+        if state ^. _argument_isRequired argumentInfoExtended
+        then sb.AppendLine($" <{name.ToLower()}>\n") |> ignore
+        else sb.AppendLine($" [<{name.ToLower()}>]\n") |> ignore
+    | None -> sb.AppendLine("\n") |> ignore
 
-        if currentCommand.Description <> "" then
-            sb.AppendLine(currentCommand.Description).AppendLine("") |> ignore
+    if currentCommand.Description <> "" then
+        sb.AppendLine(currentCommand.Description).AppendLine("") |> ignore
 
-        let subCommands = state ^. _pendingCommands
-        let arguments = state ^. _allSupportedArguments |> Seq.filter (view _argument_isMainArgument >> not)
+    let subCommands = state ^. _pendingCommands
+    let arguments = state ^. _allSupportedArguments |> Seq.filter (view _argument_isMainArgument >> not)
 
-        let maxLength =
-            subCommands |> Seq.map (fun c -> c.Command.Length)
-            |> Seq.append (arguments |> Seq.map (fun kvp -> kvp.Key.Length + 2)) //Two extra spaces for --
-            |> Seq.max
+    let maxLength =
+        subCommands |> Seq.map (fun c -> c.Command.Length)
+        |> Seq.append (arguments |> Seq.map (fun x -> (x ^._argument_argument).Length + 2)) //Two extra spaces for --
+        |> Seq.max
 
-        let titlePrefixLength = 2
-        let titleColumnSeparatorLength = 2
+    let titlePrefixLength = 2
+    let titleColumnSeparatorLength = 2
 
-        let windowWidth = max (try Console.WindowWidth with _ -> 80) 80
-        let titleColumnWidth = maxLength + titlePrefixLength + titleColumnSeparatorLength
-        let descriptionColumnWidth = windowWidth - titleColumnWidth
+    let windowWidth = max (try Console.WindowWidth with _ -> 80) 80
+    let titleColumnWidth = maxLength + titlePrefixLength + titleColumnSeparatorLength
+    let descriptionColumnWidth = windowWidth - titleColumnWidth
 
-        let printWithWordWrap (title : string) (description : string) =
-            let fullTitle =
-                title
-                    .PadLeft(title.Length + titlePrefixLength)
-                    .PadRight(titleColumnWidth)
-            sb.Append(fullTitle) |> ignore
+    let printWithWordWrap (title : string) (description : string) =
+        let fullTitle =
+            title
+                .PadLeft(title.Length + titlePrefixLength)
+                .PadRight(titleColumnWidth)
+        sb.Append(fullTitle) |> ignore
 
-            if description = ""
-            then sb.AppendLine("") |> ignore
-            elif descriptionColumnWidth < 40
-            then sb.AppendLine("").AppendLine(description.PadLeft(description.Length + titleColumnSeparatorLength))|> ignore
+        if description = ""
+        then sb.AppendLine("") |> ignore
+        elif descriptionColumnWidth < 40
+        then sb.AppendLine("").AppendLine(description.PadLeft(description.Length + titleColumnSeparatorLength))|> ignore
+        else
+
+        let mutable remainingWidth = descriptionColumnWidth
+        for word in description.Split([|' '|]) do
+            if word.Length + 1 > remainingWidth then
+                sb
+                    .AppendLine("")
+                    .Append(word.PadLeft(titleColumnWidth + word.Length))
+                    .Append(" ")
+                |> ignore
+                remainingWidth <- descriptionColumnWidth - word.Length - 1
             else
+                sb.Append(word).Append(" ") |> ignore
+                remainingWidth <- remainingWidth - word.Length - 1
+        sb.AppendLine("") |> ignore
 
-            let mutable remainingWidth = descriptionColumnWidth
-            for word in description.Split([|' '|]) do
-                if word.Length + 1 > remainingWidth then
-                    sb
-                        .AppendLine("")
-                        .Append(word.PadLeft(titleColumnWidth + word.Length))
-                        .Append(" ")
-                    |> ignore
-                    remainingWidth <- descriptionColumnWidth - word.Length - 1
+    if subCommands |> Seq.isEmpty = false then
+        sb.AppendLine("SUBCOMMANDS:\n") |> ignore
+        for subCommand in subCommands do
+            printWithWordWrap $"{subCommand.Command.ToLower()}" subCommand.Description
+        sb.AppendLine("") |> ignore
+
+    let overridesHelp =
+        arguments
+        |> Seq.exists (fun x -> String.Equals(x ^. _argument_argument, "help", StringComparison.InvariantCultureIgnoreCase))
+    let requiredArguments =
+        arguments
+        |> Seq.filter (fun x -> state ^. _argument_isRequired x)
+
+    if requiredArguments |> Seq.isEmpty = false then
+        sb.AppendLine("REQUIRED ARGUMENTS:\n") |> ignore
+        for x in requiredArguments do
+            printWithWordWrap $"--{(x ^. _argument_argument).ToLower()}" (x ^. _argument_description)
+        sb.AppendLine("") |> ignore
+
+    let optionalArguments =
+        arguments
+        |> Seq.filter (fun x -> state ^. _argument_isRequired x |> not)
+    sb.AppendLine("OPTIONAL ARGUMENTS:\n") |> ignore
+    for x in optionalArguments do
+        printWithWordWrap $"--{(x ^. _argument_argument).ToLower()}" (x ^. _argument_description)
+    if not overridesHelp then
+        printWithWordWrap "--help" "Prints a list of arguments and commands"
+
+    sb.ToString()
+let parser (allSupportedArgumentParsers : Map<_, _>) : Parser<unit, ParserState> =
+    let eof = eof <?> ""
+    let printHelp = updateUserState (_help .-> true) >>. fail ""
+    let rec pendingArgumentsParser () = getUserState >>= fun state ->
+        let argumentParsers =
+            state ^. _pendingArguments
+            |> Seq.map (fun x ->
+                let name = x ^. _argument_argument
+                if x ^. _argument_isFlag then
+                    let parser = skipStringCI $"--{name}"
+                    spaces >>. parser .>> spaces
+                    >>= (fun () -> updateUserState (_argument_assign x .-> true))
+                    <?> $"[--{name.ToLower()}]"
                 else
-                    sb.Append(word).Append(" ") |> ignore
-                    remainingWidth <- remainingWidth - word.Length - 1
-            sb.AppendLine("") |> ignore
+                    let required = state ^. _argument_isRequired x
+                    let isMainArgument = x ^. _argument_isMainArgument
+                    let assignmentKey = x ^. _argument_assignmentKey
+                    let contentParser = allSupportedArgumentParsers[assignmentKey]
+                    let fullArgumentParser =
+                        skipStringCI $"--{name}" >>. spaces1 >>. contentParser
+                    let finalParser =
+                        if isMainArgument then contentParser <|> fullArgumentParser
+                        else fullArgumentParser
 
-        if subCommands |> Seq.isEmpty = false then
-            sb.AppendLine("SUBCOMMANDS:\n") |> ignore
-            for subCommand in subCommands do
-                printWithWordWrap $"{subCommand.Command.ToLower()}" subCommand.Description
-            sb.AppendLine("") |> ignore
+                    spaces >>. finalParser .>> spaces
+                    >>= (fun value ->
+                        updateUserState (_argument_assign x .-> value))
+                    <?> if required then $"--{name.ToLower()}" else $"[--{name.ToLower()}]")
+        let commandParsers =
+            state ^. _pendingCommands
+            |> Seq.map (fun command ->
+                spaces
+                >>. (pstringCI command.Command <|> pstringCI $"--{command.Command}")
+                >>. spaces
+                >>= (fun () -> updateUserState (_currentCommand .-> command))
+                <?> $"{command.Command.ToLower()}")
+        argumentParsers
+        |> Seq.append commandParsers
+        |> Seq.append [|skipStringCI "--help" <?> "--help" >>. printHelp|]
+        |> choice
+        >>= fun () -> eof <|> pendingArgumentsParser ()
 
-        let overridesHelp =
-            arguments
-            |> Seq.exists (fun kvp -> String.Equals(kvp ^. _key, "help", StringComparison.InvariantCultureIgnoreCase))
-        let requiredArguments =
-            arguments
-            |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value))
-
-        if requiredArguments |> Seq.isEmpty = false then
-            sb.AppendLine("REQUIRED ARGUMENTS:\n") |> ignore
-            for kvp in requiredArguments do
-                printWithWordWrap $"--{(kvp ^. _key).ToLower()}" (kvp ^. _argument_description)
-            sb.AppendLine("") |> ignore
-
-        let optionalArguments =
-            arguments
-            |> Seq.filter (fun kvp -> state ^. _isRequired (kvp ^. _value) |> not)
-        sb.AppendLine("OPTIONAL ARGUMENTS:\n") |> ignore
-        for kvp in optionalArguments do
-            printWithWordWrap $"--{(kvp ^. _key).ToLower()}" (kvp ^. _argument_description)
-        if not overridesHelp then
-            printWithWordWrap "--help" "Prints a list of arguments and commands"
-
-        sb.ToString()
-
-    member this.Help() = this.Help(this.MakeState(this.GetCommandInfos()))
-    member this.WithExecutableName(name : string) =
-        executableName <- name
-        this
-    member this.WithCustomParser<'arg>(parser : Parser<'arg, _>) =
-        contentParsers[typeof<'arg>] <- (parser |>> box)
-        this
-    member this.Parse(args : string) : Result<_, _> = monad.strict {
-        let commandInfos = this.GetCommandInfos()
-        let initialState = this.MakeState(commandInfos)
-        let! result =
-            match runParserOnString parser initialState "" args with
-            | ParserResult.Success (_, state, _) -> Ok state
-            | ParserResult.Failure (_, _, state) when state ^. _help ->
-                Error (this.Help(state))
-            | ParserResult.Failure (message, _, _) when message.StartsWith "Error in" ->
-                let withoutFirstLine =
-                    message.Split(Environment.NewLine)
-                    |> Seq.skip 1
-                    |> String.concat(Environment.NewLine)
-                Error withoutFirstLine
-            | ParserResult.Failure (message, _, _) -> Error message
-        let resultCommand = result ^. _currentCommand
-        let argumentType =
-            commandInfos
-            |> List.find (fun (c, _) -> LanguagePrimitives.PhysicalEquality c resultCommand)
-            |> snd
-        let argumentObject = Activator.CreateInstance argumentType
-        for assigner in result ^. _assigners do assigner argumentObject
-        return argumentObject :?> 'a
-    }
-    member this.Parse() : Result<_, _> =
-        let firstCommandLineArg = Environment.GetCommandLineArgs()[0]
-        let rawArguments = Environment.CommandLine[firstCommandLineArg.Length..].Trim()
-        this.Parse(rawArguments)
+    eof >>. printHelp
+    <|> pendingArgumentsParser () >>. getUserState >>= fun state ->
+        match state ^. _missingArguments |> Seq.toList with
+        | [] -> preturn ()
+        | missing ->
+            let missing = missing |> Seq.map (view _argument_argument)
+            let missingString = String.concat ", " missing
+            fail $"The following required arguments are missing: {missingString}"
+let parse parameters : Result<_, _> = monad.strict {
+    let relevantTypes = parameters ^. _relevantTypes
+    let rootType = parameters ^. _rootType
+    let commandInfosExtended = makeCommandInfosExtended relevantTypes [] [(rootType, None)]
+    let makeCommandInfoAssignmentMap f =
+        commandInfosExtended
+        |> Seq.collect (fun cie ->
+            let ci = cie ^. _commandInfoExtended_commandInfo
+            cie ^. _commandInfoExtended_argumentInfosExtended
+            |> Seq.map (fun infoExtended ->
+                let assignmentKey = infoExtended ^. _argumentInfoExtended_assignmentKey ci
+                (assignmentKey, f infoExtended)
+            )
+        )
+        |> Map.ofSeq
+    let allSupportedArgumentParsers =
+        makeCommandInfoAssignmentMap <| fun infoExtended ->
+            let argumentType = infoExtended ^. _argumentInfoExtended_argumentType
+            parameters ^. _contentParser_force argumentType
+    let allAssigners = makeCommandInfoAssignmentMap (view _argumentInfoExtended_assigner)
+    let initialState = makeState rootType commandInfosExtended
+    let args = parameters ^. _arguments
+    let! result =
+        match runParserOnString (parser allSupportedArgumentParsers) initialState "" args with
+        | ParserResult.Success (_, state, _) -> Result.Ok state
+        | ParserResult.Failure (_, _, state) when state ^. _help ->
+            let executableName = parameters ^. _executableName
+            Result.Error (help executableName state)
+        | ParserResult.Failure (message, _, _) when message.StartsWith "Error in" ->
+            let withoutFirstLine =
+                message.Split(Environment.NewLine)
+                |> Seq.skip 1
+                |> String.concat(Environment.NewLine)
+            Result.Error withoutFirstLine
+        | ParserResult.Failure (message, _, _) -> Result.Error message
+    let assigners =
+        result ^. _assignedValues
+        |> Seq.collect (fun kvp ->
+            let assigner = allAssigners[kvp.Key]
+            kvp.Value |> Seq.rev |> Seq.map (fun value -> fun o -> assigner(o, value)))
+    let resultCommand = result ^. _currentCommand
+    let resultCommandInfoExtended =
+        commandInfosExtended
+        |> List.tryFind (fun x ->
+            x ^. _commandInfoExtended_commandInfo = resultCommand)
+    let targetType = resultCommandInfoExtended.Value ^. _commandInfoExtended_commandType
+    let argumentObject = Activator.CreateInstance targetType
+    for assigner in assigners do assigner argumentObject
+    return argumentObject :?> 'a
+}

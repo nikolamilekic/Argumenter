@@ -6,13 +6,7 @@ open System.Runtime.InteropServices
 [<AttributeUsage(AttributeTargets.Property)>]
 type MainArgumentAttribute() = inherit Attribute()
 
-type ArgumentRequirementType =
-    | AlwaysRequired
-    | Optional
-    | RequiredIf of string * obj
-    with
-    static member Zero = AlwaysRequired
-
+[<AttributeUsage(AttributeTargets.Property)>]
 type ArgumentRequiredAttribute(requirementType) =
     inherit Attribute()
     member _.RequirementType = requirementType

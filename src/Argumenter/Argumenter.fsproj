@@ -11,9 +11,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="paket.references" />
+    <Compile Include="ArgumentRequirementType.fs" />
     <Compile Include="Attributes.fs" />
+    <Compile Include="ArgumentInfo.fs" />
     <Compile Include="ParserState.fs" />
+    <Compile Include="MainLenses.fs" />
+    <Compile Include="ParserParameters.fs" />
     <Compile Include="ArgumentParser.fs" />
+    <Compile Include="ArgumentParserFacade.fs" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
